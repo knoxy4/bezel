@@ -1,0 +1,8 @@
+# Pin: 1.94.1. rustup's default host on THOR is x86_64-pc-windows-gnu, so a bare "1.94.1" resolves to the GNU build
+# (no MSVC; getrandom dies on dlltool). rustup rejects a host triple here, so THOR carries a per-directory override:
+#   rustup override set 1.94.1-x86_64-pc-windows-msvc   (run once in the repo root; rustup override list shows it)
+# WSL (pure crates only) uses this file as-is.
+[toolchain]
+channel = "1.94.1"
+profile = "minimal"
+components = ["rustfmt", "clippy"]

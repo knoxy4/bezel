@@ -19,6 +19,7 @@ Co-built by KNX (operator) and SPC (AI). Knox doesn't hand-code: explain results
 ## Build environment (THOR)
 - Windows-native PowerShell in `C:\Users\KNX\BEZEL`. The Win32 crates need MSVC.
 - Toolchain verified 2026-11-07: `stable-x86_64-pc-windows-msvc`, rustc/cargo 1.94.1, Visual Studio 2026 Community with C++ tools.
+- rustup's default host on THOR is **gnu**. `rust-toolchain.toml` pins `1.94.1`, and a per-directory override (`rustup override set 1.94.1-x86_64-pc-windows-msvc`, set 2026-11-07) makes it resolve to MSVC. Check `rustc -vV` shows `host: x86_64-pc-windows-msvc` before trusting a build.
 - `cargo` may not be on PATH in every shell. Fall back to `$env:USERPROFILE\.cargo\bin\cargo.exe`.
 - WSL only for the pure crates, with `CARGO_TARGET_DIR=target-wsl` so it doesn't clobber MSVC artifacts.
 

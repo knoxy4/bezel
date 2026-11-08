@@ -1,0 +1,12 @@
+[package]
+name = "bezel-replay"
+description = "OsEvent + PulseBatch trace tool (counts and rects only)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+bezel-core = { workspace = true }
+bezel-os-api = { workspace = true }

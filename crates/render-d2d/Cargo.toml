@@ -1,0 +1,15 @@
+[package]
+name = "bezel-render-d2d"
+description = "Direct2D/DirectComposition renderer (Windows only)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+bezel-core = { workspace = true }
+bezel-render-api = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true }

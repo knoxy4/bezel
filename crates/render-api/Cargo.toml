@@ -1,0 +1,11 @@
+[package]
+name = "bezel-render-api"
+description = "DrawList, Renderer trait, atlas desc, SurfaceKind."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+bezel-core = { workspace = true }

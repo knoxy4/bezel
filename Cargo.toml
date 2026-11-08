@@ -1,0 +1,73 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/core",
+    "crates/physics",
+    "crates/layout",
+    "crates/sim",
+    "crates/render-api",
+    "crates/render-d2d",
+    "crates/render-null",
+    "crates/os-api",
+    "crates/os-win32",
+    "crates/os-fake",
+    "crates/steam",
+    "crates/ui-settings",
+    "crates/app",
+    "tools/simctl",
+    "tools/replay",
+]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2021"
+rust-version = "1.94.1"
+license = "LicenseRef-Proprietary"
+publish = false
+
+[workspace.dependencies]
+bezel-core = { path = "crates/core" }
+bezel-physics = { path = "crates/physics" }
+bezel-layout = { path = "crates/layout" }
+bezel-sim = { path = "crates/sim" }
+bezel-render-api = { path = "crates/render-api" }
+bezel-render-d2d = { path = "crates/render-d2d" }
+bezel-render-null = { path = "crates/render-null" }
+bezel-os-api = { path = "crates/os-api" }
+bezel-os-win32 = { path = "crates/os-win32" }
+bezel-os-fake = { path = "crates/os-fake" }
+bezel-steam = { path = "crates/steam" }
+bezel-ui-settings = { path = "crates/ui-settings" }
+
+proptest = { version = "1.12.0", default-features = false, features = ["std"] }
+
+# ADR §7: ONE exact version, upgraded deliberately. Pinned 2026-11-07 (crates.io latest: 0.62.2).
+# Feature set trimmed to what spikes S9 (underlay) and S10 (occlusion) need. Only os-win32 and
+# render-d2d may depend on this (tools/check-deps.ps1 enforces it).
+[workspace.dependencies.windows]
+version = "=0.62.2"
+features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Direct2D",
+    "Win32_Graphics_Direct2D_Common",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_DirectComposition",
+    "Win32_Graphics_DirectWrite",
+    "Win32_Graphics_Dwm",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Graphics_Gdi",
+    "Win32_Graphics_Imaging",
+    "Win32_System_Com",
+    "Win32_System_Console",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Threading",
+    "Win32_UI_Accessibility",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+]
+
+[profile.dev]
+panic = "unwind"

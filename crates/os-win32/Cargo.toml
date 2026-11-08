@@ -1,0 +1,18 @@
+[package]
+name = "bezel-os-win32"
+description = "Win32 adapters. All unsafe Win32 code lives here and in render-d2d."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+bezel-core = { workspace = true }
+bezel-os-api = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true }
+
+[dev-dependencies]
+bezel-layout = { workspace = true }

@@ -1,0 +1,13 @@
+[package]
+name = "bezel-ui-settings"
+description = "On-demand settings panel."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+bezel-core = { workspace = true }
+bezel-layout = { workspace = true }
+bezel-os-api = { workspace = true }

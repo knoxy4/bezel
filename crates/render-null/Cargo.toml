@@ -1,0 +1,12 @@
+[package]
+name = "bezel-render-null"
+description = "Golden-test recording renderer."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+bezel-core = { workspace = true }
+bezel-render-api = { workspace = true }

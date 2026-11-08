@@ -1,0 +1,22 @@
+[package]
+name = "bezel-app"
+description = "Composition root."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+bezel-core = { workspace = true }
+bezel-physics = { workspace = true }
+bezel-layout = { workspace = true }
+bezel-sim = { workspace = true }
+bezel-render-api = { workspace = true }
+bezel-render-d2d = { workspace = true }
+bezel-render-null = { workspace = true }
+bezel-os-api = { workspace = true }
+bezel-os-win32 = { workspace = true }
+bezel-os-fake = { workspace = true }
+bezel-steam = { workspace = true }
+bezel-ui-settings = { workspace = true }

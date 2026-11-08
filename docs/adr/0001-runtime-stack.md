@@ -573,7 +573,7 @@ pub struct Platform { pub window: ExtWindowId, pub monitor: MonitorId, pub y: Px
 
 pub struct CellDelta { pub cause: RectCause, pub window: ExtWindowId, pub covered: Vec<CellId>, pub bared: Vec<CellId> }
 
-pub struct OcclusionGrid { /* per-monitor u8 coverage counts + per-window last rect */ }
+pub struct OcclusionGrid { /* per-monitor u16 coverage counts + per-window last rect (u8 could wrap at 256 stacked windows) */ }
 impl OcclusionGrid {
     pub fn new(monitors: &[MonitorInfo], cell_art_px: u16, art_scale: u8) -> Self;
     /// Incremental: −1 on old cells, +1 on new cells. Returns only cells that changed state (bare ↔ covered).
@@ -734,6 +734,26 @@ Each spike is a small binary in `os-win32/examples/`. Record pass/fail here.
 | S5 | Events from elevated windows | Delivered, or covered by the rescan backstop | Dormant on elevated targets |
 | S6 | VRR: G-Sync game in borderless mode with BEZEL running | Stand-down fires; independent flip holds | More fullscreen heuristics |
 | S8 | egui panel opened on demand on its own thread, 50 open/close cycles | No residue; no message-loop conflict | Panel in a child process |
+
+### Results
+
+**S9: PASS on the gate question (underlay, not the topmost fallback). Recovery items reported by Knox, not yet in a log.** Run 2026-11-07 ~20:00 on THOR, Windows build 10.0.26300.9818, binary `spike_s9_underlay` (debug).
+- *Logged:* structure detected as **Raised** (Progman has `WS_EX_NOREDIRECTIONBITMAP`; icons are a child of Progman; shell wallpaper `WorkerW` under it). Three monitors, all 96 DPI: 1440×2560 portrait at (−1440,−389), primary 2560×1440 at (0,0), 2560×1440 at (1360,−1440). **DirectComposition target on a `WS_CHILD` of Progman worked on all three monitors**; the flip-swap-chain fallback wasn't needed. Attach took 92 ms.
+- *Screenshot:* the checkerboard renders beneath app windows and beneath the desktop icons. Transparent mode over the live wallpaper (top monitor) shows the animated wallpaper through the checkerboard with the moving square on top. 22 fps against a 30 fps target (debug build, three monitor-sized swap chains, unpaced presents; not a perf number, S4 measures that).
+- *Read-only probe after the run:* the live-wallpaper app puts one window tree per monitor (4 windows each) **inside the shell's wallpaper `WorkerW`**, which sits below our underlays under the raised structure. Occupancy detection found exactly those, so all three monitors correctly started in transparent mode (Knox runs a live wallpaper on every monitor). No underlay window was left under Progman after the process ended.
+- *Reported by Knox, not in the log:* "everything seemed to work correct", without per-item detail. Unconfirmed checklist items: icons clickable, Explorer restart, wallpaper change, virtual-desktop switch, no flicker across reattach, clean exit. The log has no lines for any of these and no clean-exit line. The first build of the spike truncated its log on each start (now fixed: append), so a second launch may have erased them. **Explorer restart, wallpaper change and opaque mode: waived by Knox 2026-11-07, untested.** The recovery code exists in the spike; it gets exercised again in W6 hardening and at the demo gate (fest plan §4), which requires Explorer-restart and wallpaper-change recovery.
+- *Re-run, 20:43, log fixed to append:* **5 forced reattaches (`r`) at 79–91 ms each,** every time Raised + DComp + transparent on all three monitors, 0 z-order drift fixes. **Clean quit:** "detached 3 underlay(s) (quit)", wallpaper never written. The first run's tail also shows a clean quit at 38 s. Still not in any log: an Explorer restart (no `TaskbarCreated` line), a wallpaper change, `t` (opaque mode). A virtual-desktop switch leaves no line when nothing breaks, so its silence counts as weak evidence it held. Flicker across a reattach rests on Knox's eyes.
+- *Not testable on THOR:* mixed-DPI monitors (all three are 100%). Opaque mode wasn't exercised, because every monitor has a live wallpaper; press `t` to check it.
+- *Consequence for D38:* under the raised structure, transparent mode works because the foreign wallpaper is *below* the underlay by construction (inside the shell `WorkerW`). The legacy structure hasn't been seen on THOR.
+
+**S10: PASS.** Run 2026-11-07, 20:12–20:43 on THOR (1,847 s of Knox's normal use, three monitors at 96 DPI), binary `spike_s10_occlusion` (debug), log `spike_s10.log`.
+- *Event volume:* 111,877 raw WinEvents (60.6/s average, peak 818/s); **2,455 kept by the filter** (top-level, `OBJID_WINDOW`/`CHILDID_SELF`): 1.3/s average, **peak 93/s**, above 20/s in 33 of 1,798 seconds. The filter keeps 2.2%. The ADR's "noise under N events/s" never had a number. Proposed N = 100 filtered/s peak, which this run meets.
+- *Fidelity:* **364 rescans compared against the incremental grid, 0 mismatches: 0 false-covered, 0 false-bare cells,** final rescan included. 4 rescans were skipped because a drag was in progress. 7–13 windows counted at a time; 14 cloaked windows (other virtual desktops, hidden system UI) excluded at boot.
+- *Drag sweep:* 329 drag samples at ≤ 30 Hz. The largest single-sample jump was **1,400 px** (a fast fling). The sweep interpolates at one cell per step, so that leaves no gap (unit-tested in `bezel-layout`).
+- *Overlays:* at one point 2 click-through windows were up and were excluded. No window covering ≥ 90% of a monitor was topmost or layered; every such coverer was an ordinary maximized window.
+- *Frame bounds:* 5 windows carry invisible resize borders outside their DWM frame (21 px average, left + right + bottom). The grid uses the DWM extended frame. The rescan uses the same source, so it can't catch a wrong rect source; the absence of a buried strip rests on Knox's eyes on the debug grid.
+- *Finding for the sim (not a defect):* `sweep(from, to)` returns every cell the window touched along the path, including the cells it already covered. The sim has to subtract the window's own previous cells before crushing. That's why "cells swept" in the log runs ~7,000 per sample for a large window.
+- *Not measured:* elevated windows (S5). The 1 Hz rescan backstop isn't needed on this evidence.
 
 THOR: S4 and S6 are timed GPU work → quiet GPU plus a gpu lease, per the `thor_lease.ps1` header. Check status before release builds.
 
