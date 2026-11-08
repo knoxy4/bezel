@@ -10,6 +10,8 @@ fn main() {
 }
 
 #[cfg(windows)]
+mod atlas;
+#[cfg(windows)]
 mod extract;
 
 /// stdout + an appended `bezel.log` in the working directory (rects, ids and counts only).
@@ -232,6 +234,23 @@ fn main() {
     }
     let mut target: Option<TargetWindow> = tracker.foreground();
     let mut sim = Sim::new(SimConfig { art_scale: scale as f32, ..SimConfig::default() }, SEED);
+    // Hero sprites (D46). Missing atlas = plain shapes, not a failure.
+    let sprites = match atlas::Sprites::load(std::path::Path::new("assets/atlas")) {
+        Some((sp, desc)) => match gfx.load_atlas(&desc) {
+            Ok(()) => {
+                say!("atlas: {} sprites", sp.len());
+                sp
+            }
+            Err(e) => {
+                say!("atlas failed to load ({e}); drawing shapes");
+                atlas::Sprites::default()
+            }
+        },
+        None => {
+            say!("no assets/atlas/hero.atlas; drawing shapes");
+            atlas::Sprites::default()
+        }
+    };
     say!(
         "BEZEL phase 3 loop: home monitor {} ({}x{}), {} windows tracked, TRENCH {:?}, SHAFT {:?}",
         home.id.0,
@@ -409,7 +428,7 @@ fn main() {
             };
             next_frame = Instant::now() + Duration::from_secs_f32(1.0 / hz);
             if !stood_down {
-                let frame = extract::frame(&sim, &mons, &bars, scale as f32);
+                let frame = extract::frame(&sim, &mons, &bars, scale as f32, &sprites);
                 if let Err(e) = gfx.submit(&frame) {
                     say!("submit: {e}");
                 }

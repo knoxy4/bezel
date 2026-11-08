@@ -9,7 +9,7 @@ use windows::Win32::Foundation::HWND;
 use windows::Win32::Graphics::Direct2D::Common::{D2D1_ALPHA_MODE_IGNORE, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COLOR_F, D2D1_PIXEL_FORMAT, D2D_RECT_F};
 use windows::Win32::Graphics::Direct2D::{
     ID2D1DeviceContext, ID2D1Image, ID2D1SolidColorBrush, D2D1_BITMAP_OPTIONS_CANNOT_DRAW, D2D1_BITMAP_OPTIONS_TARGET, D2D1_BITMAP_PROPERTIES1,
-    D2D1_DRAW_TEXT_OPTIONS_NONE,
+    D2D1_DRAW_TEXT_OPTIONS_NONE, D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
 };
 use windows::Win32::Graphics::DirectComposition::{IDCompositionTarget, IDCompositionVisual};
 use windows::Win32::Graphics::DirectWrite::DWRITE_MEASURING_MODE_NATURAL;
@@ -213,8 +213,18 @@ pub(crate) unsafe fn draw_cmd(gpu: &Gpu, dc: &ID2D1DeviceContext, cmd: &DrawCmd)
                 dc.DrawText(&text, &f, &r, &brush(*c)?, D2D1_DRAW_TEXT_OPTIONS_NONE, DWRITE_MEASURING_MODE_NATURAL);
             }
         },
-        // Sprites need the atlas (phase 4); skipped until then.
-        DrawCmd::Sprite { .. } => {}
+        DrawCmd::Sprite { id, frame, x, y, flip_x, alpha, scale } => {
+            let atlas = gpu.atlas.borrow();
+            let Some(a) = atlas.as_ref() else { return Ok(()) };
+            let f = if *flip_x { 1 } else { *frame };
+            let Some((r, pv)) = a.frames.get(&(id.0, f)).or_else(|| a.frames.get(&(id.0, 0))) else { return Ok(()) };
+            let (w, h) = (r[2] * scale, r[3] * scale);
+            let (l, t) = ((x - pv[0] * w).round(), (y - pv[1] * h).round());
+            let src = D2D_RECT_F { left: r[0], top: r[1], right: r[0] + r[2], bottom: r[1] + r[3] };
+            unsafe {
+                dc.DrawBitmap(&a.bmp, Some(&D2D_RECT_F { left: l, top: t, right: l + w, bottom: t + h }), *alpha as f32 / 255.0, D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR, Some(&src), None);
+            }
+        }
     }
     Ok(())
 }

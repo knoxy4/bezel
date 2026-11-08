@@ -1,0 +1,20 @@
+# <sprite> <pivot_x> <pivot_y> as 0..1 fractions of the frame; default 0.5 1.0 (bottom centre = feet).
+# Davits hang their rope from the pulley, so the pulley is the pivot.
+davit_r 0.84 0.16
+davit_l 0.16 0.16
+core 0.5 0.5
+crystal_s 0.5 0.5
+crystal_m 0.5 0.5
+crystal_l 0.5 0.5
+debris_0 0.5 0.5
+plank 0.5 0.5
+girder_bent 0.5 0.5
+cog 0.5 0.5
+sheet_metal 0.5 0.5
+spark_0 0.5 0.5
+spark_1 0.5 0.5
+spark_2 0.5 0.5
+spark_3 0.5 0.5
+drill_0 0.5 0.0
+drill_1 0.5 0.0
+drill_2 0.5 0.0

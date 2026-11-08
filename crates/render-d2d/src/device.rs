@@ -28,6 +28,13 @@ pub struct Gpu {
     pub wic: IWICImagingFactory,
     fonts: RefCell<HashMap<u32, IDWriteTextFormat>>,
     brushes: RefCell<HashMap<[u8; 4], ID2D1SolidColorBrush>>,
+    pub atlas: RefCell<Option<Atlas>>,
+}
+
+/// The loaded sprite sheet: one bitmap, frame rects and pivots by (sprite, frame).
+pub struct Atlas {
+    pub bmp: windows::Win32::Graphics::Direct2D::ID2D1Bitmap1,
+    pub frames: HashMap<(u32, u16), ([f32; 4], [f32; 2])>,
 }
 
 impl Gpu {
@@ -55,7 +62,7 @@ impl Gpu {
             let dcomp = DCompositionCreateDevice::<_, IDCompositionDevice>(&dxgi).ok();
             let dwrite: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
             let wic: IWICImagingFactory = CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?;
-            Ok(Self { d3d, factory, dc, dcomp, dwrite, wic, fonts: RefCell::new(HashMap::new()), brushes: RefCell::new(HashMap::new()) })
+            Ok(Self { d3d, factory, dc, dcomp, dwrite, wic, fonts: RefCell::new(HashMap::new()), brushes: RefCell::new(HashMap::new()), atlas: RefCell::new(None) })
         }
     }
 

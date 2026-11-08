@@ -25,7 +25,7 @@
 - Open design question: canopy for a normal window hugging the top edge (band is a stretch; a side-hung rig is a cheaper option). Decide after wall-run.
 
 ## Knox
-- Approve the hero sprite set. Final capsule picks. Choose tags. Answer the three store-copy questions.
+- ~~Approve the hero sprite set.~~ Done 2026-11-08. Final capsule picks. Choose tags. Answer the three store-copy questions.
 
 ## Status (2026-11-08)
 - `tools/run-bezel.ps1` written (thor_lease `run`: the lease lives as long as the app).
@@ -37,4 +37,6 @@
 - **D45 (Knox, 2026-11-08): a rig rides its own window.** Dragging the anchor carries the rig, davits and rope tops (ropes swing); another window's drag still crushes; closing collapses it; minimize/hide/virtual-desktop buries it until the window returns. Wall-run still snaps. Sim tests: 16.
 - Run 1 of phase 4 (2026-11-08, `bezel.log`): wall-run hooked two windows and snapped when they moved; 3 cores landed (drill to 107 m); rigs deployed with 2 ropes each. **Bug:** rigs 8, 12 and 16 were crushed on the first few pixels of dragging their own window, despite D45 passing its tests. Crush events now log their cause (`Swept`/`DragCover` + the window, or `AnchorClosed`) next to the rig's own window id; next run names the culprit.
 - Run 2 of phase 4: Knox, "it's good"; no crush on dragging a rig's own window this time (the run-1 crushes didn't reproduce; crush-cause logging stays in). Knox: ropes should **bounce off the window, not swing behind it** → each rope now treats its anchor window as a solid collider (nodes pushed out along the shallowest axis, sideways speed reflected at 0.35); the collider follows the window under D45. Ropes spawn swung outward. Physics tests: 9.
+- **Hero sprites (D46):** Knox generated 11 Gemini sheets from `docs/art/gemini-prompts.md` (descriptions only, no refs). `tools/build_sprites.py` cuts them (magenta key, object detection with per-sheet boxes where objects touch, pixel-grid sampling at a per-sheet block so everything sits at game scale against a 29 px miner, palette, outline) into 71 named sprites; `tools/pack_atlas.py` packs them with mirrored copies into `assets/atlas/hero.png` (142 frames) + `hero.atlas`. render-d2d loads the atlas and draws sprites nearest-neighbour; extract draws miners by state, girder + outpost + davits on rigs, furnace by heat, tiled trench/shaft, drill + elevator cage, core, salvage and sparks, with shape fallbacks. Davit pulley height 22 → 44 px to match the sprite. Builds clean; not run on the desktop yet.
+- Run 3 of phase 4 (sprite build, two runs of 121 s and 182 s): atlas loaded (71 sprites), rig deployed with 2 ropes and rode its window through a long drag, cores landed, clean exits. **Knox approved the hero sprite set (2026-11-08): "looked good."** Left for the trailer-ready gate: 30 s of footage, and Knox's tags, capsule picks and store-copy answers.
 

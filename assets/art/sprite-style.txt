@@ -1,0 +1,1 @@
+crisp 16-bit pixel art game sprite sheet, hard pixel edges, chunky dark outlines, flat shading with two tones per material, limited palette of slate blue, charcoal grey, rusty brown, warm amber and orange, bright cyan accents, side view, every object separate and fully visible, isolated on a flat solid pure magenta background, no shadows on the background, no text, no border

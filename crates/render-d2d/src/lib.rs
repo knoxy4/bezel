@@ -110,8 +110,15 @@ mod renderer {
             }
         }
 
-        fn load_atlas(&mut self, _atlas: &AtlasDesc) -> Result<(), RenderError> {
-            Err(RenderError::Unsupported("atlas pipeline lands in phase 4".into()))
+        fn load_atlas(&mut self, atlas: &AtlasDesc) -> Result<(), RenderError> {
+            let (bmp, _, _) = crate::wallpaper::load_image(&self.gpu, &atlas.image).map_err(|e| RenderError::Device(format!("atlas image: {e}")))?;
+            let frames = atlas
+                .frames
+                .iter()
+                .map(|f| ((f.id.0, f.frame), ([f.rect[0] as f32, f.rect[1] as f32, f.rect[2] as f32, f.rect[3] as f32], f.pivot)))
+                .collect();
+            *self.gpu.atlas.borrow_mut() = Some(crate::device::Atlas { bmp, frames });
+            Ok(())
         }
 
         fn set_wallpaper(&mut self, m: MonitorId, image: Option<&std::path::Path>, fit: WallpaperFitR, background: Rgba8) -> Result<(), RenderError> {

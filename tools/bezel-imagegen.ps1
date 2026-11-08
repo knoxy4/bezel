@@ -10,13 +10,15 @@ param(
     [Parameter(Mandatory)][string]$Prompt,
     [string]$Size = '1024x1024',
     [int]$Count = 8,
-    [string]$Ref,
+    [string[]]$Ref,
     [int]$Seed,
+    # Style suffix under assets/art: bezel-style.txt for scenes, sprite-style.txt for isolated game assets on magenta.
+    [string]$StyleFile = 'bezel-style.txt',
     [switch]$Wait
 )
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
-$style = (Get-Content (Join-Path $repo 'assets\art\bezel-style.txt') -Raw).Trim()
+$style = (Get-Content (Join-Path $repo "assets\art\$StyleFile") -Raw).Trim()
 $full = "$($Prompt.Trim().TrimEnd('.')), $style"
 $jobs = Join-Path $repo 'assets\art\jobs'
 New-Item -ItemType Directory -Force $jobs | Out-Null
@@ -25,7 +27,7 @@ $out = Join-Path $jobs "$Name-$stamp.json"
 
 # Illustration preset's steps/guidance (imagegen engine/recipes.py) with our own suffix in place of its scaffold.
 $a = @('X:\imagegen\src\imagegen\cli.py', '--json', '--style', 'raw', '--steps', '8', '--guidance', '1.2', '--size', $Size, '--count', "$Count")
-if ($Ref) { $a += @('--ref', $Ref) }
+foreach ($r in $Ref) { $a += @('--ref', $r) }
 if ($Seed) { $a += @('--seed', "$Seed") }
 $a += $full
 $quoted = $a | ForEach-Object { '"' + ($_ -replace '"', '\"') + '"' }

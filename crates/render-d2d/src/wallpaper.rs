@@ -69,7 +69,7 @@ impl Wallpaper {
     }
 }
 
-fn load_image(gpu: &Gpu, path: &std::path::Path) -> Result<(ID2D1Bitmap1, f32, f32)> {
+pub(crate) fn load_image(gpu: &Gpu, path: &std::path::Path) -> Result<(ID2D1Bitmap1, f32, f32)> {
     unsafe {
         let dec = gpu.wic.CreateDecoderFromFilename(&HSTRING::from(path.as_os_str()), None, GENERIC_READ, WICDecodeMetadataCacheOnDemand)?;
         let frame = dec.GetFrame(0)?;

@@ -19,7 +19,8 @@ pub enum SurfaceKind {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum DrawCmd {
-    Sprite { id: SpriteId, frame: u16, x: f32, y: f32, flip_x: bool, alpha: u8 },
+    /// (x, y) is where the sprite's pivot lands, in surface px; `scale` multiplies its art px (art scale × extra).
+    Sprite { id: SpriteId, frame: u16, x: f32, y: f32, flip_x: bool, alpha: u8, scale: f32 },
     Polyline { pts: Vec<[f32; 2]>, width: f32, color: Rgba8, glow: bool },
     Particles { pts: Vec<[f32; 3]>, color: Rgba8 },
     Fill { rect: [f32; 4], color: Rgba8 },
@@ -52,12 +53,22 @@ pub enum WallpaperFitR {
     Span { virtual_screen: RectPx },
 }
 
-/// Sprite sheet + frame map. Filled in when the atlas pipeline lands (phase 4).
+/// One frame of one sprite in the sheet. Frame 1 of every sprite is its mirrored copy (`flip_x` uses it).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AtlasFrame {
+    pub id: SpriteId,
+    pub frame: u16,
+    /// x, y, w, h in sheet px.
+    pub rect: [u32; 4],
+    /// 0..1 of the frame: where (x, y) of a Sprite command lands.
+    pub pivot: [f32; 2],
+}
+
+/// Sprite sheet + frame map (phase 4: `assets/atlas/hero.png` + `hero.atlas`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct AtlasDesc {
     pub image: std::path::PathBuf,
-    /// (sprite, frame) → source rect in the sheet, px.
-    pub frames: Vec<(SpriteId, u16, [u32; 4])>,
+    pub frames: Vec<AtlasFrame>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
