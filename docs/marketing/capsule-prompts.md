@@ -1,6 +1,6 @@
 # Capsule art prompts (THOR pipeline)
 
-**Status:** ready for the week-2 style frame. Written 2026-11-07. Nothing has been generated yet.
+**Status:** style frame locked 2026-11-07 (header candidate 4, seed 1589715672): `assets/art/style-frame.png`. Capsule finals not generated yet.
 **Pipeline:** `imagegen` on THOR (FLUX.2-klein-4B, see the thor-imagegen skill). D28: every run takes a **gpu lease**.
 
 Tags: **[VERIFY]** = check before relying on it.
@@ -9,11 +9,12 @@ Tags: **[VERIFY]** = check before relying on it.
 
 ## Ground rules
 
-1. **The style frame leads.** Every prompt below runs with `--ref <style-frame.png>` once Knox picks the frame in week 2. Before then, run them without `--ref` only to explore composition.
-2. **No text in generated art.** klein renders lettering unreliably. Generate each capsule with the logo area left empty, and lay the BEZEL logotype on top by hand, from one vector source.
-3. **Batch, don't loop.** Use `--count 8` per prompt. Keep the seed of every pick, so a final can be regenerated at another size.
-4. **Generate at klein's sizes, crop to Steam's.** klein works best near 1 MP. Generate at the ratio below, then upscale and crop to the exact capsule size.
-5. **Look:** hybrid art (D8): crisp pixel-art miners and structures, smooth antialiased ropes, glow and effects. The tone is spectacle (D9).
+1. **The style frame leads.** Every prompt below runs with `--ref assets/art/style-frame.png` (locked: header candidate 4).
+2. **The window frames are the terrain.** Miners climb the windows' outer frames and build on bare desktop; nothing is painted inside a window. Title bars stay generic: no app icons, no browser chrome. (The style-frame batch got both wrong.)
+3. **No text in generated art.** klein renders lettering unreliably. Generate each capsule with the logo area left empty, and lay the BEZEL logotype on top by hand, from one vector source.
+4. **Batch, don't loop.** Use `--count 8` per prompt. Keep the seed of every pick, so a final can be regenerated at another size.
+5. **Generate at klein's sizes, crop to Steam's.** klein works best near 1 MP. Generate at the ratio below, then upscale and crop to the exact capsule size.
+6. **Look:** hybrid art (D8): crisp pixel-art miners and structures, smooth antialiased ropes, glow and effects. The tone is spectacle (D9).
 
 ### Steam capsule sizes [VERIFY in Steamworks → Store Assets before cropping]
 
@@ -31,15 +32,14 @@ Tags: **[VERIFY]** = check before relying on it.
 
 ## Running a batch
 
-Check the board first. The gpu lease covers the run, and the job releases it when done:
+Use the BEZEL wrapper. It adds the custom style (D43) and runs imagegen detached; the imagegen daemon takes the gpu lease itself. **Never wrap imagegen in `thor_lease submit`/`take`:** the daemon queues behind its own caller and deadlocks (it happened 2026-11-07). Check the board first, and remember that killing the client doesn't stop a batch.
 
 ```powershell
 & C:\Users\KNX\CAGED\tools\thor_lease.ps1 status
-& C:\Users\KNX\CAGED\tools\thor_lease.ps1 submit gpu -By bezel-art -For 'BEZEL capsule: header x8' -EstMin 4 -Exe X:\imagegen\.venv\Scripts\python.exe -ArgList 'X:\imagegen\src\imagegen\cli.py --json --style illustration --size 1536x720 --count 8 --ref X:\BEZEL\art\style-frame.png "<prompt>"'
-& C:\Users\KNX\CAGED\tools\thor_lease.ps1 job -JobId <id> -Json
+.\tools\bezel-imagegen.ps1 -Name header -Size 1536x720 -Count 8 -Ref C:\Users\KNX\BEZEL\assets\art\style-frame.png -Prompt '<prompt>'
 ```
 
-Estimate ~14 s per image, so 8 images are about 2 minutes, plus a cold start. `X:\BEZEL\art\style-frame.png` is a placeholder path until the frame exists.
+Result paths and seeds land in `assets/art/jobs/<name>-<stamp>.json`. With contention, 1536-wide images took ~40 s each on 2026-11-07, not the 14 s the skill quotes.
 
 ---
 

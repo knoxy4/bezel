@@ -106,6 +106,17 @@ pub struct MonitorInfo {
     pub primary: bool,
 }
 
+/// A window's top edge where the cells directly above it are bare (D24). Lives in core so physics can land on it
+/// without depending on layout (D42).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Platform {
+    pub window: ExtWindowId,
+    pub monitor: MonitorId,
+    pub y: Px,
+    pub x0: Px,
+    pub x1: Px,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TargetWindow {
     pub id: ExtWindowId,

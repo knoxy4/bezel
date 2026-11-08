@@ -39,11 +39,15 @@ bezel-os-fake = { path = "crates/os-fake" }
 bezel-steam = { path = "crates/steam" }
 bezel-ui-settings = { path = "crates/ui-settings" }
 
+raw-window-handle = "0.6.2"
 proptest = { version = "1.12.0", default-features = false, features = ["std"] }
 
 # ADR §7: ONE exact version, upgraded deliberately. Pinned 2026-11-07 (crates.io latest: 0.62.2).
 # Feature set trimmed to what spikes S9 (underlay) and S10 (occlusion) need. Only os-win32 and
 # render-d2d may depend on this (tools/check-deps.ps1 enforces it).
+# Vector2 for Direct2D points; pinned to the version windows =0.62.2 itself depends on.
+windows-numerics = "=0.3.1"
+
 [workspace.dependencies.windows]
 version = "=0.62.2"
 features = [
@@ -65,6 +69,7 @@ features = [
     "Win32_System_Threading",
     "Win32_UI_Accessibility",
     "Win32_UI_HiDpi",
+    "Win32_UI_Input", # phase 3: Raw Input pulses (header-only keyboard)
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ]

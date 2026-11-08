@@ -1,12 +1,3 @@
-//! Windows as terrain (D24): a window's top edge is a platform wherever the cells directly above it are bare.
+//! Windows as terrain (D24). The `Platform` type lives in core (D42); `OcclusionGrid::platforms` produces it.
 
-use bezel_core::{ExtWindowId, MonitorId, Px};
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Platform {
-    pub window: ExtWindowId,
-    pub monitor: MonitorId,
-    pub y: Px,
-    pub x0: Px,
-    pub x1: Px,
-}
+pub use bezel_core::Platform;

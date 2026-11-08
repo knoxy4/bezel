@@ -10,6 +10,7 @@ publish.workspace = true
 [dependencies]
 bezel-core = { workspace = true }
 bezel-os-api = { workspace = true }
+raw-window-handle = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true }

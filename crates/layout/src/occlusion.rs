@@ -265,6 +265,35 @@ impl OcclusionGrid {
         (c.cx < g.cols && c.cy < g.rows).then(|| g.counts[g.idx(c.cx, c.cy)])
     }
 
+    /// The cell under a physical-px point, if it's on a monitor.
+    pub fn cell_at(&self, x: Px, y: Px) -> Option<CellId> {
+        let g = self.monitors.iter().find(|g| g.bounds.contains(x, y))?;
+        let cx = ((x - g.bounds.l) / self.cell_px) as u16;
+        let cy = ((y - g.bounds.t) / self.cell_px) as u16;
+        (cx < g.cols && cy < g.rows).then_some(CellId { monitor: g.id, cx, cy })
+    }
+
+    /// Every cell a rect touches, across monitors. Empty if the rect is off every monitor.
+    pub fn cells_in(&self, r: RectPx) -> Vec<CellId> {
+        let mut out = Vec::new();
+        for g in &self.monitors {
+            if let Some(cr) = g.cell_range(self.cell_px, &r) {
+                for cy in cr.cy0..cr.cy1 {
+                    for cx in cr.cx0..cr.cx1 {
+                        out.push(CellId { monitor: g.id, cx, cy });
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// True if the rect lies on at least one monitor and every cell it touches is bare.
+    pub fn all_bare(&self, r: RectPx) -> bool {
+        let cells = self.cells_in(r);
+        !cells.is_empty() && cells.iter().all(|c| self.is_bare(*c))
+    }
+
     /// Number of tracked windows.
     pub fn tracked(&self) -> usize {
         self.windows.len()

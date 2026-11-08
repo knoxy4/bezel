@@ -10,3 +10,4 @@ publish.workspace = true
 [dependencies]
 bezel-core = { workspace = true }
 bezel-physics = { workspace = true }
+bezel-layout = { workspace = true }

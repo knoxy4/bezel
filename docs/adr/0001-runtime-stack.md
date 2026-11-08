@@ -80,6 +80,9 @@ Tags: **[VERIFY]** means remembered and may have drifted. **[UNTESTED]** means n
 | **D39** | Steam Direct fee timing | **Paid at the trailer-ready gate** (target early December). No money changes hands before S9 passes and the hero loop is on screen. | Knox (Spec's pick, kept) |
 | **D40** | Store presence | **Coming Soon page only, release date "To be announced."** No release until Knox calls the game shippable. | Knox |
 | **D41** | Development app id | **Valve's generic test app id** until BEZEL's own app exists [VERIFY id and limits]. Builds under it are dev-only and are never distributed. | Knox |
+| **D42** | Dependency rule vs §8 signatures | **`Platform` moves to `core`; `sim` may depend on `layout`.** `physics::fall_step` takes platforms and `sim` consumes `Zones`/`CellDelta`; both are pure, so the Win32 firewall is unchanged. | Knox (Spec's pick, kept) |
+| **D43** | Art style | **Custom BEZEL style built on the imagegen `illustration` preset** (suffix kept in `assets/art/bezel-style.txt`, run as `--style raw` with the preset's steps/guidance). The shared imagegen tool is not modified. **Style frame locked 2026-11-07: candidate 4 of the header batch, seed 1589715672, `assets/art/style-frame.png`.** Every later art run passes it as `--ref`. | Knox |
+| **D44** | Schedule | **Weeks become phases.** Work runs ahead of the calendar; the fest dates and the money gates stay fixed. | Knox |
 
 **Spec's calls in rev 3, all reversible:**
 - Sweep-crush is sampled from the drag's own location events at ≤ 30 Hz.
@@ -371,7 +374,7 @@ bezel/
 **Dependency rule:**
 ```
 core ← physics ← sim
-core ← layout
+core ← layout ← sim          (D42)
 core ← render-api ← { render-d2d, render-null }
 core ← os-api     ← { os-win32,   os-fake }
 core + layout + os-api ← ui-settings
@@ -427,6 +430,10 @@ pub struct PulseBatch {
 #[derive(Clone, Debug)]
 pub struct MonitorInfo { pub id: MonitorId, pub bounds: RectPx, pub work: RectPx, pub dpi: u32, pub primary: bool }
 
+/// A window's top edge where the cells above it are bare (D24). In core so physics needn't depend on layout (D42).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Platform { pub window: ExtWindowId, pub monitor: MonitorId, pub y: Px, pub x0: Px, pub x1: Px }
+
 #[derive(Clone, Copy, Debug)]
 pub struct TargetWindow { pub id: ExtWindowId, pub frame: RectPx, pub monitor: MonitorId, pub maximized: bool }
 
@@ -470,6 +477,11 @@ pub trait ShellDock {
     fn taskbar_edge(&self, m: MonitorId) -> Edge;
     fn dock(&mut self, s: SurfaceId, m: MonitorId, edge: Edge, thickness: Px, mode: DockMode) -> Result<RectPx, OsError>;
     fn undock_all(&mut self);                        // every exit path
+    /// Phase 2: the bar's window, for the renderer.
+    fn surface_handle(&self, s: SurfaceId) -> Option<raw_window_handle::RawWindowHandle>;
+    /// Phase 2 (S3): re-docks after ABN_POSCHANGED / Explorer restart; emits Docked on rect changes and StandDown on
+    /// ABN_FULLSCREENAPP (bars hide, invariant 3). Call ~once a frame.
+    fn service(&mut self) -> Vec<OsEvent>;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -490,7 +502,12 @@ pub trait DesktopLayer {
     fn wallpaper(&self, m: MonitorId) -> Option<WallpaperDesc>;
     fn foreign_occupant(&self, m: MonitorId) -> bool;    // live-wallpaper app or desktop widget detected
     fn set_mode(&mut self, m: MonitorId, mode: UnderlayMode) -> Result<(), OsError>;
+    /// Phase 2 (S9): the layer itself notices Explorer restarts, outside teardown and z-order drift. ~1 Hz.
+    fn health(&mut self) -> LayerHealth;
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LayerHealth { Ok, ZOrderFixed, ResetNeeded }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UnderlayMode { Opaque, TransparentOverForeign, Excluded }   // D38
@@ -538,11 +555,14 @@ pub struct DrawList { pub surface: SurfaceId, pub dirty: Vec<RectPx>, pub cmds: 
 pub struct FrameStats { pub surfaces_drawn: u8, pub cpu_us: u32 }
 
 pub trait Renderer {
-    fn attach(&mut self, s: SurfaceId, kind: SurfaceKind, h: raw_window_handle::RawWindowHandle, size: (u32, u32), art_scale: u8) -> Result<(), RenderError>;
+    /// Phase 2: takes the surface's screen rect, not just its size (span wallpapers and screen-space draws need the origin).
+    fn attach(&mut self, s: SurfaceId, kind: SurfaceKind, h: raw_window_handle::RawWindowHandle, rect: RectPx, art_scale: u8) -> Result<(), RenderError>;
     fn resize(&mut self, s: SurfaceId, size: (u32, u32));
     fn detach(&mut self, s: SurfaceId);
     fn load_atlas(&mut self, atlas: &AtlasDesc) -> Result<(), RenderError>;
     fn set_wallpaper(&mut self, m: MonitorId, image: Option<&std::path::Path>, fit: WallpaperFitR, background: Rgba8) -> Result<(), RenderError>;
+    /// Phase 2 (D38): opaque, or transparent over a foreign live wallpaper. Needs the DComp presenter.
+    fn set_underlay_transparent(&mut self, m: MonitorId, transparent: bool) -> Result<(), RenderError>;
     /// Bars: dirty rects + ONE atomic commit. Underlays: wallpaper repaint under dirty rects + partial present.
     fn submit(&mut self, frame: &[DrawList]) -> Result<FrameStats, RenderError>;
 }
@@ -561,15 +581,15 @@ impl RopeWorld {
 
 pub struct FallBody { pub pos: [f32; 2], pub vel: [f32; 2], pub chute: bool }
 pub enum Landing { Platform(ExtWindowId), Bedrock, StillFalling }
-/// Falls through bare cells; lands on the first platform below (D24) or on bedrock.
-pub fn fall_step(b: &mut FallBody, dt: f32, platforms: &[Platform]) -> Landing;
+/// Falls through bare cells; lands on the first platform below (D24) or on bedrock at `bedrock_y` (the trench top).
+/// `bedrock_y` added in phase 2: the original signature had no way to know where bedrock is.
+pub fn fall_step(b: &mut FallBody, dt: f32, platforms: &[Platform], bedrock_y: Px) -> Landing;
 
 // ── crates/layout ────────────────────────────────────────────
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CanopyPolicy { StrictExterior, EdgeHug }   // default EdgeHug (D1)
 
-#[derive(Clone, Copy, Debug)]
-pub struct Platform { pub window: ExtWindowId, pub monitor: MonitorId, pub y: Px, pub x0: Px, pub x1: Px }
+// Platform lives in core (D42); layout produces it, physics lands on it.
 
 pub struct CellDelta { pub cause: RectCause, pub window: ExtWindowId, pub covered: Vec<CellId>, pub bared: Vec<CellId> }
 
@@ -730,7 +750,7 @@ Each spike is a small binary in `os-win32/examples/`. Record pass/fail here.
 |---|---|---|---|
 | S1 | BAND (and the fallback set) as a `NOREDIRECTIONBITMAP` DirectComposition window, fully click-through via `WS_EX_LAYERED\|WS_EX_TRANSPARENT` | Renders and passes clicks | `UpdateLayeredWindow` for BAND |
 | S2 | `SetCapture` drag from a NOACTIVATE window that has never been activated | Tracks past the edge | Drags stay inside the surface |
-| S4 | Footprint at the D10 floor with three underlays + bars, measured with PresentMon/ETW + Task Manager | Under 5% GPU on 3080 Ti; under 150 MB RAM; VRAM under 250 MB [UNTESTED targets] | Coarser cells, lower particle budget, underlay presents capped at 24 fps |
+| S4 | Footprint at the D10 floor with three underlays + bars, measured with PresentMon/ETW + Task Manager | Under 5% GPU on the RTX 3080 12GB; under 150 MB RAM; VRAM under 250 MB [UNTESTED targets] | Coarser cells, lower particle budget, underlay presents capped at 24 fps |
 | S5 | Events from elevated windows | Delivered, or covered by the rescan backstop | Dormant on elevated targets |
 | S6 | VRR: G-Sync game in borderless mode with BEZEL running | Stand-down fires; independent flip holds | More fullscreen heuristics |
 | S8 | egui panel opened on demand on its own thread, 50 open/close cycles | No residue; no message-loop conflict | Panel in a child process |
@@ -754,6 +774,20 @@ Each spike is a small binary in `os-win32/examples/`. Record pass/fail here.
 - *Frame bounds:* 5 windows carry invisible resize borders outside their DWM frame (21 px average, left + right + bottom). The grid uses the DWM extended frame. The rescan uses the same source, so it can't catch a wrong rect source; the absence of a buried strip rests on Knox's eyes on the debug grid.
 - *Finding for the sim (not a defect):* `sweep(from, to)` returns every cell the window touched along the path, including the cells it already covered. The sim has to subtract the window's own previous cells before crushing. That's why "cells swept" in the log runs ~7,000 per sample for a large window.
 - *Not measured:* elevated windows (S5). The 1 Hz rescan backstop isn't needed on this evidence.
+
+**S3: PASS.** Run 2026-11-07 22:01 on THOR by `tools/s3-harness.ps1` (no hands; work area read from a separate process), binary `spike_s3_appbars` (debug), logs `spike_s3.log` + `s3-harness.log`. 5/5 checks.
+- *Docking:* TRENCH registered first at (0,1288)–(2560,1400), 2560×112, **above the Windows 11 taskbar**. SHAFT at (0,0)–(144,1288), stopping at TRENCH's top, so the corner belongs to TRENCH (§2.5). Primary work area went from (0,0,2560,1400) to **(144,0,2560,1288)**; the other monitors were untouched. One `ABN_POSCHANGED` right after docking; re-docking was idempotent.
+- *Normal exit:* `ABM_REMOVE` on both; the work area was back to baseline within 0.6 s.
+- *Explorer restart:* the reservation dropped when Explorer died (t=4.7 s), `TaskbarCreated` arrived at 7.2 s, both bars re-registered, and **the work area was restored at 8.9 s**. Maximized windows have ~4 s at full size in between; acceptable.
+- *Force-kill (`Stop-Process -Force`, no cleanup ran):* **no leak. The shell reclaimed the space 1 s after the process died** (it notices the AppBar window is gone). The worst-bug case in CLAUDE.md doesn't happen on this build; `ABM_REMOVE` on every exit path stays mandatory anyway.
+- *Final work area equals baseline.*
+- *Not exercised:* `ABN_FULLSCREENAPP` (needs a fullscreen app; S6 covers stand-down), DPI change, home-monitor change.
+
+**S0: PASS.** Run 2026-11-07 22:32 on THOR by Knox, binary `spike_s0_corner` (debug), log `spike_s0.log`.
+- *Setup:* TRENCH (0,1288)–(960,1400) and SHAFT (0,648)–(144,1288) as plain topmost DComp popups (not AppBars) on **one DirectComposition device, each drawing into an `IDCompositionSurface`, both updated by one `Commit()` per frame**. A 56 px sprite crossed the seam at y=1288 at 700 px/s.
+- *Knox's eyes:* **no tear.** The sprite's halves never split at the seam.
+- *Pacing (informational; the GPU wasn't quiet, CAGED jobs were running):* paced by `DwmFlush` to the compositor, so it ran at the ~165 Hz refresh, not 60: 3,017 frames in 20 s (~157 fps), median interval 6.2 ms, **max `Commit()` 2.6 ms**, 119 frames (3.9%) over 1.5× the median, 0 draw errors.
+- *Consequence:* the bars can share one device and one commit as §2.5 planned; the corner fallback (corner owned entirely by TRENCH) isn't needed. The real bars must pace to the D10 tiers, not to `DwmFlush`.
 
 THOR: S4 and S6 are timed GPU work → quiet GPU plus a gpu lease, per the `thor_lease.ps1` header. Check status before release builds.
 

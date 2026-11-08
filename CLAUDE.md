@@ -13,7 +13,7 @@ Co-built by KNX (operator) and SPC (AI). Knox doesn't hand-code: explain results
 ## Canon (read before work)
 - `docs/adr/0001-runtime-stack.md`: architecture plus decision log D1–D41. **Binding.** If code and the ADR disagree, stop and flag it.
 - `docs/plan/fest-2027.md`: schedule, scope cut and gates. Anything outside its §2 waits.
-- `docs/plan/w1-runbook.md`: current tasks.
+- `docs/plan/phase-2-runbook.md`: current tasks. Weeks are now phases (D44); `w1-runbook.md` is phase 1, done.
 - This repo's `docs/` is canon for code. The claude.ai BEZEL project mirrors it. When the ADR changes here, say so in the summary to Knox so the mirror gets updated.
 
 ## Build environment (THOR)
@@ -51,7 +51,7 @@ Every exit path runs `ABM_REMOVE` on both AppBars and detaches every underlay wi
 ## Code layout (ADR §7)
 - All `unsafe` lives in `os-win32` and `render-d2d`. Only those two crates may depend directly on `windows`.
 - The `windows` crate is pinned to **one exact version** (`=x.y.z`), recorded in the workspace `Cargo.toml`. Upgrades are deliberate, never casual.
-- Dependency rule: `core ← physics ← sim`, `core ← layout`, `core ← render-api ← {render-d2d, render-null}`, `core ← os-api ← {os-win32, os-fake}`, `app ← everything`. `tools/check-deps.ps1` fails if `windows` appears in the dependency tree of `bezel-sim`, `bezel-layout` or `bezel-physics`.
+- Dependency rule: `core ← physics ← sim`, `core ← layout ← sim` (D42), `core ← render-api ← {render-d2d, render-null}`, `core ← os-api ← {os-win32, os-fake}`, `app ← everything`. `tools/check-deps.ps1` fails if `windows` appears in the dependency tree of `bezel-sim`, `bezel-layout` or `bezel-physics`.
 - Spikes go in `crates/os-win32/examples/spike_sN_<name>.rs`. Record each verdict (pass/fail, numbers, notes) in ADR §9.
 
 ## Working rules

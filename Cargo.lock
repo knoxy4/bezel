@@ -43,6 +43,7 @@ name = "bezel-os-api"
 version = "0.0.1"
 dependencies = [
  "bezel-core",
+ "raw-window-handle",
 ]
 
 [[package]]
@@ -60,6 +61,7 @@ dependencies = [
  "bezel-core",
  "bezel-layout",
  "bezel-os-api",
+ "raw-window-handle",
  "windows",
 ]
 
@@ -75,6 +77,7 @@ name = "bezel-render-api"
 version = "0.0.1"
 dependencies = [
  "bezel-core",
+ "raw-window-handle",
 ]
 
 [[package]]
@@ -83,7 +86,9 @@ version = "0.0.1"
 dependencies = [
  "bezel-core",
  "bezel-render-api",
+ "raw-window-handle",
  "windows",
+ "windows-numerics",
 ]
 
 [[package]]
@@ -107,6 +112,7 @@ name = "bezel-sim"
 version = "0.0.1"
 dependencies = [
  "bezel-core",
+ "bezel-layout",
  "bezel-physics",
 ]
 
@@ -265,6 +271,12 @@ checksum = "60aa6af80be32871323012e02e6e65f8a7cc7890931ae421d217ad8fe0df2ccf"
 dependencies = [
  "rand_core",
 ]
+
+[[package]]
+name = "raw-window-handle"
+version = "0.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "20675572f6f24e9e76ef639bc5552774ed45f1c30e2951e1e99c59888861c539"
 
 [[package]]
 name = "regex-syntax"

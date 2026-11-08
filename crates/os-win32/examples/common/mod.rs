@@ -70,6 +70,12 @@ pub fn set_per_monitor_v2() {
     log_line(&format!("dpi awareness per-monitor-v2: {}", if r.is_ok() { "set" } else { "FAILED (already set by manifest?)" }));
 }
 
+/// Same as `set_per_monitor_v2`, without logging (for probe modes that print one line).
+pub fn set_per_monitor_v2_quiet() {
+    // SAFETY: process-wide setting, called once before any window exists.
+    let _ = unsafe { SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) };
+}
+
 // ── monitors ─────────────────────────────────────────────────────
 
 #[derive(Clone, Debug, PartialEq)]

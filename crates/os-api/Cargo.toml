@@ -9,3 +9,4 @@ publish.workspace = true
 
 [dependencies]
 bezel-core = { workspace = true }
+raw-window-handle = { workspace = true }

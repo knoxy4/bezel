@@ -3,3 +3,4 @@ target-wsl/
 *.log
 *.pdb
 .vs/
+assets/art/jobs/
