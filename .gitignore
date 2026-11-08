@@ -1,0 +1,5 @@
+target/
+target-wsl/
+*.log
+*.pdb
+.vs/
