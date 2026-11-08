@@ -83,6 +83,7 @@ Tags: **[VERIFY]** means remembered and may have drifted. **[UNTESTED]** means n
 | **D42** | Dependency rule vs §8 signatures | **`Platform` moves to `core`; `sim` may depend on `layout`.** `physics::fall_step` takes platforms and `sim` consumes `Zones`/`CellDelta`; both are pure, so the Win32 firewall is unchanged. | Knox (Spec's pick, kept) |
 | **D43** | Art style | **Custom BEZEL style built on the imagegen `illustration` preset** (suffix kept in `assets/art/bezel-style.txt`, run as `--style raw` with the preset's steps/guidance). The shared imagegen tool is not modified. **Style frame locked 2026-11-07: candidate 4 of the header batch, seed 1589715672, `assets/art/style-frame.png`.** Every later art run passes it as `--ref`. | Knox |
 | **D44** | Schedule | **Weeks become phases.** Work runs ahead of the calendar; the fest dates and the money gates stay fixed. | Knox |
+| **D45** | Anchored rigs vs drags | **A rig rides its own window.** Dragging or moving the anchor window carries its rig, davits and ropes along (ropes swing). Only *another* window's drag crushes a rig (D21 unchanged for that). Anchor closed → the rig collapses with salvage; anchor minimized, hidden or cloaked (virtual-desktop switch) → buried until it returns. Wall-run still snaps when its window is dragged (the window leaves the shaft wall). Supersedes the rig part of §2.4's "anchored … snaps at MOVESIZESTART". | Knox |
 
 **Spec's calls in rev 3, all reversible:**
 - Sweep-crush is sampled from the drag's own location events at ≤ 30 Hz.
@@ -99,7 +100,7 @@ Tags: **[VERIFY]** means remembered and may have drifted. **[UNTESTED]** means n
 - The edge-hug band (which needs S1) is a stretch goal for the fest cut.
 
 **Concept references:**
-- Gemini mockup (2026-11-07): outpost on the window's top edge, ropes down the frame, elevator handoff at the corner, hybrid art.
+- Gemini mockup (2026-11-07): outpost on the window's top edge, ropes down the frame, elevator handoff at the corner, hybrid art. File: `assets/art/reference/inspiration-01.jpg`; breakdown in `docs/art/inspiration.md`.
 - Knox's 3-monitor screenshot (2026-11-07): frontier territory marked in red. It matches what the underlay exposes.
 
 ---
@@ -166,7 +167,7 @@ A rope or outpost that ends up behind *another* window is simply hidden behind i
 | Open / show, restore, maximize, keyboard snap or other software move (`LOCATIONCHANGE` outside a move/size loop), virtual-desktop switch (cloak/uncloak) | **Bury.** Structures pause and go invisible; they dig out when the cells are bare again. |
 | Close / hide / minimize / move away (cells become bare) | **Unbury.** Buried structures resume. |
 
-Anything anchored *to* a window that gets grabbed (ropes, its top-edge outpost, units standing on it as a platform) snaps or falls at `MOVESIZESTART`, as in rev 2.
+Anything anchored *to* a window that gets grabbed (ropes, its top-edge outpost, units standing on it as a platform) snaps or falls at `MOVESIZESTART`, as in rev 2. **Superseded for rigs by D45:** a rig rides its window; wall-run still snaps.
 
 ### 2.5 Bedrock seams
 - **TRENCH ↔ SHAFT** (bottom-left corner): TRENCH registers first and gets the full width; SHAFT registers second, on the left, and stops at the top of the trench. The corner belongs to TRENCH. Both bars are drawn on one DirectComposition device, so a single `Commit()` updates both and the seam can't tear [VERIFY S0].

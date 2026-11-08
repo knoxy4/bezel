@@ -14,6 +14,8 @@ pub const CHUTE_TERMINAL: f32 = 120.0;
 const MAX_SUBSTEP: f32 = 1.0 / 60.0;
 const ROPE_ITERATIONS: usize = 24;
 const ROPE_DAMPING: f32 = 0.985;
+/// How much of a node's speed survives a bounce off a collider.
+const ROPE_RESTITUTION: f32 = 0.35;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct RopeId(pub u32);
@@ -25,6 +27,8 @@ struct Rope {
     seg_len: f32,
     start_pin: Option<[f32; 2]>,
     end_pin: Option<[f32; 2]>,
+    /// A solid rect (l, t, r, b) the rope can't pass through: its anchor window (Knox: ropes bounce off it).
+    collider: Option<[f32; 4]>,
 }
 
 /// Verlet rope chains on a fixed internal step.
@@ -48,8 +52,22 @@ impl RopeWorld {
             })
             .collect();
         let len = ((end[0] - anchor[0]).powi(2) + (end[1] - anchor[1]).powi(2)).sqrt();
-        self.ropes.push(Rope { prev: pos.clone(), pos, seg_len: (len / n as f32).max(0.5), start_pin: Some(anchor), end_pin: None });
+        self.ropes.push(Rope { prev: pos.clone(), pos, seg_len: (len / n as f32).max(0.5), start_pin: Some(anchor), end_pin: None, collider: None });
         RopeId((self.ropes.len() - 1) as u32)
+    }
+
+    /// Move the pinned top (the rope's anchor rode its window somewhere new). The rest follows physically.
+    pub fn pin_start(&mut self, r: RopeId, at: [f32; 2]) {
+        if let Some(rope) = self.ropes.get_mut(r.0 as usize) {
+            rope.start_pin = Some(at);
+        }
+    }
+
+    /// Make a rect solid for this rope (or clear it). Nodes that swing into it are pushed out and bounce.
+    pub fn set_collider(&mut self, r: RopeId, rect: Option<[f32; 4]>) {
+        if let Some(rope) = self.ropes.get_mut(r.0 as usize) {
+            rope.collider = rect;
+        }
     }
 
     /// Pin the free end (a rope strung between two points).
@@ -67,6 +85,14 @@ impl RopeWorld {
         if let Some(rope) = self.ropes.get_mut(r.0 as usize) {
             rope.start_pin = None;
             rope.end_pin = None;
+        }
+    }
+
+    /// Done with this rope (it fell away or faded): stop simulating it. Its id stays valid and yields no nodes.
+    pub fn retire(&mut self, r: RopeId) {
+        if let Some(rope) = self.ropes.get_mut(r.0 as usize) {
+            rope.pos.clear();
+            rope.prev.clear();
         }
     }
 
@@ -95,6 +121,9 @@ impl RopeWorld {
 }
 
 fn step_rope(rope: &mut Rope, h: f32) {
+    if rope.pos.len() < 2 {
+        return; // retired
+    }
     let g = GRAVITY * h * h;
     for (p, q) in rope.pos.iter_mut().zip(rope.prev.iter_mut()) {
         let v = [(p[0] - q[0]) * ROPE_DAMPING, (p[1] - q[1]) * ROPE_DAMPING];
@@ -110,6 +139,7 @@ fn step_rope(rope: &mut Rope, h: f32) {
         if let Some(b) = rope.end_pin {
             rope.pos[last] = b;
         }
+        collide(rope, false);
         for i in 0..last {
             let (a, b) = (rope.pos[i], rope.pos[i + 1]);
             let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
@@ -128,11 +158,29 @@ fn step_rope(rope: &mut Rope, h: f32) {
             rope.pos[i + 1][1] -= dy * diff * wb / sum;
         }
     }
+    collide(rope, true);
     if let Some(a) = rope.start_pin {
         rope.pos[0] = a;
     }
     if let Some(b) = rope.end_pin {
         rope.pos[last] = b;
+    }
+}
+
+/// Push nodes out of the collider along the shallowest axis. With `bounce`, reflect that velocity component too
+/// (verlet keeps velocity as pos - prev, so the reflection lives in `prev`).
+fn collide(rope: &mut Rope, bounce: bool) {
+    let Some([l, t, r, b]) = rope.collider else { return };
+    for (p, q) in rope.pos.iter_mut().zip(rope.prev.iter_mut()) {
+        if p[0] <= l || p[0] >= r || p[1] <= t || p[1] >= b {
+            continue;
+        }
+        let pens = [(p[0] - l, 0usize, l), (r - p[0], 0, r), (p[1] - t, 1, t), (b - p[1], 1, b)];
+        let (_, axis, edge) = pens.iter().copied().fold((f32::MAX, 0, 0.0), |m, x| if x.0 < m.0 { x } else { m });
+        let v = p[axis] - q[axis];
+        p[axis] = edge;
+        // Mid-solve passes keep the motion; the final pass reflects it (that's the bounce).
+        q[axis] = if bounce { edge + v * ROPE_RESTITUTION } else { edge - v };
     }
 }
 
@@ -280,6 +328,27 @@ mod tests {
         for (a, b) in before.iter().zip(w.nodes(r)) {
             assert!(b[1] > a + 50.0, "every node drops after a cut");
         }
+    }
+
+    #[test]
+    fn a_rope_bounces_off_its_window_instead_of_passing_behind_it() {
+        let mut w = RopeWorld::new();
+        // Hanging just left of a window at x 100..500, then flung hard to the right, into it.
+        let r = w.spawn([90.0, 0.0], [90.0, 300.0], 12);
+        w.set_collider(r, Some([100.0, 0.0, 500.0, 400.0]));
+        for _ in 0..20 {
+            w.step(0.05);
+        }
+        for p in w.ropes[r.0 as usize].prev.iter_mut().skip(1) {
+            p[0] -= 40.0; // a big rightward velocity on every free node
+        }
+        let mut max_x: f32 = 0.0;
+        for _ in 0..60 {
+            w.step(0.05);
+            max_x = max_x.max(w.nodes(r).iter().map(|p| p[0]).fold(f32::MIN, f32::max));
+            assert!(w.nodes(r).iter().all(|p| p[0] <= 100.0 || p[1] <= 0.0 || p[1] >= 400.0), "no node inside the window");
+        }
+        assert!(max_x >= 99.0, "it actually reached the frame and bounced, max x {max_x}");
     }
 
     #[test]

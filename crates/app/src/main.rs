@@ -89,7 +89,7 @@ fn probe() {
         let maximized = r.width() >= m.work.width() - 16 && r.height() >= m.work.height() - 16;
         let t = TargetWindow { id: *id, frame: *r, monitor: m.id, maximized };
         let mut sim = Sim::new(SimConfig { art_scale: scale as f32, ..SimConfig::default() }, 1);
-        sim.step(&FrameInputs { pulses: PulseBatch::default(), cells: &[], swept: &[], moved: &[], target: Some(t), grid: &grid, bedrock: &bedrock });
+        sim.step(&FrameInputs { pulses: PulseBatch::default(), cells: &[], swept: &[], moved: &[], target: Some(t), grid: &grid, bedrock: &bedrock, shaft: None });
         say!(
             "  window {:x} on m{} ({},{})-({},{}){}: {}",
             id.0,
@@ -249,11 +249,12 @@ fn main() {
     let mut next_frame = Instant::now();
     let mut stood_down = false;
     let mut cells: Vec<CellDelta> = Vec::new();
-    let mut swept: Vec<CellId> = Vec::new();
-    let mut moved: Vec<(ExtWindowId, RectCause)> = Vec::new();
+    let mut swept: Vec<(ExtWindowId, CellId)> = Vec::new();
+    let mut moved: Vec<(ExtWindowId, Option<RectPx>, RectCause)> = Vec::new();
     let mut pulse_acc = PulseBatch::default();
     let (mut frames, mut crushes, mut rigs_built) = (0u64, 0u32, 0u32);
     let mut last_report = Instant::now() - Duration::from_secs(60);
+    let mut sim_anchor: HashMap<u32, ExtWindowId> = HashMap::new();
     let mut last_why: (Option<(ExtWindowId, RectPx, bool)>, Option<bezel_sim::BuildBlock>) = (None, None);
 
     loop {
@@ -287,12 +288,12 @@ fn main() {
                 if let (Some(a), Some(b)) = (prev, rect) {
                     // Every cell the window crossed, minus the ones it was already covering (S10 finding).
                     let already = grid.cells_in(a);
-                    swept.extend(grid.sweep(a, b).into_iter().filter(|c| !already.contains(c)));
+                    swept.extend(grid.sweep(a, b).into_iter().filter(|c| !already.contains(c)).map(|c| (id, c)));
                 }
             }
             cells.push(grid.apply(id, rect, cause));
             if prev.is_some() {
-                moved.push((id, cause));
+                moved.push((id, rect, cause));
             }
             match rect {
                 Some(r) => {
@@ -355,7 +356,7 @@ fn main() {
         last = now;
         while acc >= DT {
             acc -= DT;
-            let events = sim.step(&FrameInputs { pulses: pulse_acc, cells: &cells, swept: &swept, moved: &moved, target, grid: &grid, bedrock: &bedrock });
+            let events = sim.step(&FrameInputs { pulses: pulse_acc, cells: &cells, swept: &swept, moved: &moved, target, grid: &grid, bedrock: &bedrock, shaft: bars.get(&SurfaceId::Shaft).copied() });
             pulse_acc = PulseBatch::default();
             cells.clear();
             swept.clear();
@@ -373,6 +374,9 @@ fn main() {
                 }
                 last_why = why;
             }
+            for r in sim.rigs() {
+                sim_anchor.insert(r.id, r.window);
+            }
             for e in events {
                 match e {
                     SimEvent::RigDeployed { id } => {
@@ -380,11 +384,16 @@ fn main() {
                         let ropes = sim.rigs().iter().find(|r| r.id == id).map(|r| r.ropes.iter().flatten().count()).unwrap_or(0);
                         say!("rig {id} deployed with {ropes} rope(s){}", if ropes == 0 { " (no bare desktop beside the window: miners jump)" } else { "" });
                     }
-                    SimEvent::StructureCrushed { id, salvage } => {
+                    SimEvent::StructureCrushed { id, salvage, by } => {
                         crushes += 1;
-                        say!("rig {id} crushed: {salvage} salvage falling home");
+                        let anchor = sim_anchor.get(&id).copied();
+                        say!("rig {id} crushed by {by:?} (rig's window {:?}): {salvage} salvage falling home", anchor.map(|w: ExtWindowId| format!("{:x}", w.0)));
                     }
                     SimEvent::StructureBuried { id } => say!("rig {id} buried"),
+                    SimEvent::WallRunStarted { window } => say!("wall-run: crew hooked window {:x} from the shaft", window.0),
+                    SimEvent::WallRunReleased => say!("wall-run released (target changed)"),
+                    SimEvent::WallRunSnapped => say!("wall-run snapped (hooked window moved)"),
+                    SimEvent::BossCore { tier } => say!("core landed in the trench (tier {tier}, depth {} m)", sim.depth()),
                     SimEvent::StructureUnburied { id } => say!("rig {id} dug out"),
                     _ => {}
                 }

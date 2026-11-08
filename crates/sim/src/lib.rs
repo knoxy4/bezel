@@ -72,15 +72,18 @@ pub struct FrameInputs<'a> {
     pub pulses: PulseBatch,
     /// Cause-tagged state changes from the occlusion grid (D21).
     pub cells: &'a [CellDelta],
-    /// Cells crossed by drag sweeps (`OcclusionGrid::sweep` between drag samples): these crush.
-    pub swept: &'a [CellId],
-    /// Windows whose rect actually changed (or vanished), with why. Anything anchored to them snaps.
-    pub moved: &'a [(ExtWindowId, RectCause)],
+    /// Cells crossed by drag sweeps (`OcclusionGrid::sweep` between drag samples), tagged with the dragged window.
+    /// They crush anything but the dragged window's own rig (D45).
+    pub swept: &'a [(ExtWindowId, CellId)],
+    /// Windows whose rect actually changed (or vanished: `None`), with why. Rigs ride their window (D45).
+    pub moved: &'a [(ExtWindowId, Option<RectPx>, RectCause)],
     pub target: Option<TargetWindow>,
     pub grid: &'a OcclusionGrid,
     /// Per monitor: its x range (bounds) and the bedrock y there (trench top on the home monitor, work-area bottom
     /// elsewhere).
     pub bedrock: &'a [(RectPx, Px)],
+    /// SHAFT's rect on the home monitor (screen px): wall-run and the drill live inside it.
+    pub shaft: Option<RectPx>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -99,14 +102,32 @@ pub enum LandingKind {
 #[derive(Clone, Debug, PartialEq)]
 pub enum SimEvent {
     RigDeployed { id: u32 },
+    WallRunStarted { window: ExtWindowId },
+    /// The target changed: the crew slides home with what it has.
+    WallRunReleased,
+    /// The hooked window moved: the line snaps and the crew falls.
+    WallRunSnapped,
+    /// A core from the drill landed in the trench (shaft lite).
+    BossCore { tier: u8 },
     RopeSnapped(RopeId),
     UnitFalling { unit: u32 },
     UnitLanded { unit: u32, on: LandingKind },
-    StructureCrushed { id: u32, salvage: u32 },
+    StructureCrushed { id: u32, salvage: u32, by: CrushCause },
     StructureBuried { id: u32 },
     StructureUnburied { id: u32 },
     CargoDelivered { kind: Cargo, qty: u32 },
     Smelted { fuel: u32 },
+}
+
+/// What destroyed a rig (diagnostics: a phase-4 run crushed rigs on their own window's first drag pixels).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CrushCause {
+    /// Another window's drag sweep crossed it.
+    Swept { by: ExtWindowId },
+    /// Another window's drag covered it.
+    DragCover { by: ExtWindowId, cause: RectCause },
+    /// Its anchor window closed.
+    AnchorClosed,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -122,6 +143,7 @@ pub struct Ledger {
     pub fuel: u32,
     pub salvage_total: u32,
     pub delivered_total: u32,
+    pub cores: u32,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -135,6 +157,10 @@ pub struct Rig {
     pub ropes: [Option<RopeId>; 2],
     /// The davit holding each rope: (post base on the window's top corner, jib tip the rope hangs from). Knox, run 4.
     pub cranes: [Option<([f32; 2], [f32; 2])>; 2],
+    /// The anchor window's frame the rig was last placed on.
+    pub anchor: RectPx,
+    /// The anchor is minimized, hidden or cloaked: the rig is buried until it comes back (D45).
+    pub lost: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -144,6 +170,28 @@ pub enum UnitState {
     Falling(FallBody),
     Walking { y: Px, x0: Px, x1: Px, dir: f32 },
     Home { t: u32 },
+    /// Wall-run (§2.3): climbing SHAFT's inner wall toward the hook (y in screen px).
+    WallClimb { y: f32 },
+    WallMine { t: u32 },
+    /// Sliding down the inner wall to the trench with a load.
+    WallSlide { y: f32 },
+}
+
+/// A maximized or flush-left target hooked from inside SHAFT. Nothing is drawn over the window itself.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WallRun {
+    pub window: ExtWindowId,
+    /// The window's top-left corner, where the grapple bites (screen px).
+    pub hook: [f32; 2],
+    /// The crew's line runs down SHAFT's inner wall at this x.
+    pub wall_x: f32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Spark {
+    pub pos: [f32; 2],
+    pub vel: [f32; 2],
+    pub ttl: u32,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -198,6 +246,16 @@ pub struct Sim {
     cooldown: u32,
     burst_ticks: u32,
     build_block: Option<BuildBlock>,
+    wallrun: Option<WallRun>,
+    depth: u32,
+    drilling: bool,
+    burn_acc: f32,
+    core_acc: f32,
+    cores_falling: Vec<FallBody>,
+    loose: Vec<(RopeId, u32)>,
+    sparks: Vec<Spark>,
+    /// Trench hatches flashing where cargo just came home: (screen x, ticks left).
+    hatches: Vec<(f32, u32)>,
     last_target: Option<(ExtWindowId, RectPx)>,
     settled_ticks: u32,
 }
@@ -227,6 +285,15 @@ const JIB_H: f32 = 22.0; // davit height above the window's top edge
 const POST_INSET: f32 = 6.0; // davit post sits this far inside the window's top corner
 const CLIMB_PX_PER_TICK: f32 = 9.0;
 const WALK_PX_PER_TICK: f32 = 4.0;
+const WALL_CLIMB_PX_PER_TICK: f32 = 7.0;
+const WALL_SLIDE_PX_PER_TICK: f32 = 16.0;
+/// Seconds of drilling per unit of fuel burned (one metre bored).
+const FUEL_BURN_SECS: f32 = 1.5;
+/// Seconds of drilling per core dropped (shaft lite: a core on a timer).
+const CORE_SECS: f32 = 40.0;
+const CORE_SCRAP: u32 = 15;
+const LOOSE_ROPE_TICKS: u32 = 60;
+const HATCH_TICKS: u32 = 24;
 /// One second of a still target before a rig goes up.
 const SETTLE_TICKS: u32 = SIM_HZ;
 
@@ -271,6 +338,15 @@ impl Sim {
             build_block: None,
             last_target: None,
             settled_ticks: 0,
+            wallrun: None,
+            depth: 0,
+            drilling: false,
+            burn_acc: 0.0,
+            core_acc: 0.0,
+            cores_falling: Vec::new(),
+            loose: Vec::new(),
+            sparks: Vec::new(),
+            hatches: Vec::new(),
         }
     }
 
@@ -307,10 +383,38 @@ impl Sim {
         self.build_block
     }
 
+    pub fn wallrun(&self) -> Option<&WallRun> {
+        self.wallrun.as_ref()
+    }
+    /// Metres the drill has bored.
+    pub fn depth(&self) -> u32 {
+        self.depth
+    }
+    pub fn drilling(&self) -> bool {
+        self.drilling
+    }
+    /// 0..1 progress to the next core.
+    pub fn core_progress(&self) -> f32 {
+        (self.core_acc / CORE_SECS).clamp(0.0, 1.0)
+    }
+    pub fn cores_falling(&self) -> &[FallBody] {
+        &self.cores_falling
+    }
+    /// Cut ropes still whipping and falling, with ticks left.
+    pub fn loose_ropes(&self) -> &[(RopeId, u32)] {
+        &self.loose
+    }
+    pub fn sparks(&self) -> &[Spark] {
+        &self.sparks
+    }
+    pub fn hatches(&self) -> &[(f32, u32)] {
+        &self.hatches
+    }
+
     pub fn anim_demand(&self) -> AnimDemand {
-        if self.burst_ticks > 0 || !self.salvage.is_empty() {
+        if self.burst_ticks > 0 || !self.salvage.is_empty() || !self.sparks.is_empty() || !self.cores_falling.is_empty() {
             AnimDemand::Burst
-        } else if self.units.iter().any(|u| !matches!(u.state, UnitState::Home { .. } | UnitState::AtRig { .. })) {
+        } else if self.drilling || self.units.iter().any(|u| !matches!(u.state, UnitState::Home { .. } | UnitState::AtRig { .. })) {
             AnimDemand::Active
         } else {
             AnimDemand::Ambient
@@ -326,9 +430,12 @@ impl Sim {
         self.catastrophes(inp, &mut ev);
         self.bury(inp.grid, &mut ev);
         self.maybe_build(inp, &mut ev);
+        self.wallrun_step(inp, &mut ev);
+        self.drill_step(inp, &mut ev);
         self.ropes.step(DT);
         self.units_step(inp, &mut ev);
         self.salvage_step(inp, &mut ev);
+        self.fx_step();
         ev
     }
 
@@ -354,38 +461,94 @@ impl Sim {
         }
     }
 
-    /// D21: drag sweeps and drag-caused coverage crush; a moved or vanished anchor snaps its rig.
+    /// D21 + D45: another window's drag sweep (or drag-caused coverage) crushes a rig; its own window carries it.
     fn catastrophes(&mut self, inp: &FrameInputs, ev: &mut Vec<SimEvent>) {
-        let mut doomed: Vec<u32> = Vec::new();
-        for rig in &self.rigs {
-            let anchor_moved = inp.moved.iter().any(|(w, _)| *w == rig.window);
+        for (w, rect, cause) in inp.moved {
+            let ids: Vec<u32> = self.rigs.iter().filter(|r| r.window == *w).map(|r| r.id).collect();
+            for id in ids {
+                match (rect, cause) {
+                    (None, RectCause::Destroyed) => self.crush(id, CrushCause::AnchorClosed, ev),
+                    (None, _) => {
+                        if let Some(r) = self.rigs.iter_mut().find(|r| r.id == id) {
+                            r.lost = true;
+                        }
+                    }
+                    (Some(f), _) => self.carry(id, *f),
+                }
+            }
+        }
+        let mut doomed: Vec<(u32, CrushCause)> = Vec::new();
+        for rig in self.rigs.iter().filter(|r| !r.lost) {
             let cells = inp.grid.cells_in(sky(rig.rect, inp.grid.cell_px()));
-            let swept = inp.swept.iter().any(|c| cells.contains(c));
+            let swept = inp.swept.iter().find(|(w, c)| *w != rig.window && cells.contains(c)).map(|(w, _)| CrushCause::Swept { by: *w });
             let drag_cover = inp
                 .cells
                 .iter()
-                .filter(|d| matches!(d.cause, RectCause::DragStart | RectCause::DragSample | RectCause::DragEnd))
-                .any(|d| d.covered.iter().any(|c| cells.contains(c)));
-            if anchor_moved || swept || drag_cover {
-                doomed.push(rig.id);
+                .filter(|d| d.window != rig.window && matches!(d.cause, RectCause::DragStart | RectCause::DragSample | RectCause::DragEnd))
+                .find(|d| d.covered.iter().any(|c| cells.contains(c)))
+                .map(|d| CrushCause::DragCover { by: d.window, cause: d.cause });
+            if let Some(why) = swept.or(drag_cover) {
+                doomed.push((rig.id, why));
             }
         }
-        for id in doomed {
-            self.crush(id, ev);
+        for (id, why) in doomed {
+            self.crush(id, why, ev);
         }
     }
 
-    fn crush(&mut self, id: u32, ev: &mut Vec<SimEvent>) {
+    /// D45: the anchor window moved to `f`; the rig, its davits and rope tops go with it, and so do the miners on it.
+    fn carry(&mut self, id: u32, f: RectPx) {
+        let s = self.cfg.art_scale;
+        let Some(i) = self.rigs.iter().position(|r| r.id == id) else { return };
+        let (hw, h) = ((RIG_W * s / 2.0) as Px, (RIG_H * s) as Px);
+        let cx = (f.l + f.r) / 2;
+        let new = RectPx::new(cx - hw, f.t - h, cx + hw, f.t);
+        let rig = &mut self.rigs[i];
+        let (dx, dy) = ((new.l - rig.rect.l) as f32, (new.t - rig.rect.t) as f32);
+        let old = rig.anchor;
+        let post_in = POST_INSET * s;
+        for k in 0..2 {
+            if let Some((_, tip)) = rig.cranes[k] {
+                // Keep each davit's reach and height; re-seat it on the window's new corner.
+                let (side_old, side_new, post) = if k == 0 { (old.l, f.l, f.l as f32 + post_in) } else { (old.r, f.r, f.r as f32 - post_in) };
+                let reach = tip[0] - side_old as f32;
+                let lift = old.t as f32 - tip[1];
+                let new_tip = [side_new as f32 + reach, f.t as f32 - lift];
+                rig.cranes[k] = Some(([post, f.t as f32], new_tip));
+                if let Some(r) = rig.ropes[k] {
+                    self.ropes.pin_start(r, new_tip);
+                    self.ropes.set_collider(r, Some([f.l as f32, f.t as f32, f.r as f32, f.b as f32]));
+                }
+            }
+        }
+        rig.rect = new;
+        rig.anchor = f;
+        rig.lost = false;
+        for u in &mut self.units {
+            if matches!(u.state, UnitState::AtRig { rig, .. } if rig == id) {
+                u.pos[0] += dx;
+                u.pos[1] += dy;
+            }
+        }
+    }
+
+    fn crush(&mut self, id: u32, by: CrushCause, ev: &mut Vec<SimEvent>) {
         let Some(i) = self.rigs.iter().position(|r| r.id == id) else { return };
         let rig = self.rigs.remove(i);
         let salvage = self.cfg.rig_cost * self.cfg.salvage_pct / 100;
-        ev.push(SimEvent::StructureCrushed { id, salvage });
+        ev.push(SimEvent::StructureCrushed { id, salvage, by });
         for r in rig.ropes.into_iter().flatten() {
             self.ropes.cut(r);
+            self.loose.push((r, LOOSE_ROPE_TICKS)); // it whips and falls for a moment instead of vanishing
             ev.push(SimEvent::RopeSnapped(r));
         }
         // Salvage scatters from the wreck and falls home.
         let (cx, cy) = (((rig.rect.l + rig.rect.r) / 2) as f32, ((rig.rect.t + rig.rect.b) / 2) as f32);
+        for _ in 0..18 {
+            let vel = [self.rng.signed() * 420.0, -120.0 - 320.0 * self.rng.signed().abs()];
+            let ttl = 16 + (self.rng.next() % 16) as u32;
+            self.sparks.push(Spark { pos: [cx, cy], vel, ttl });
+        }
         let pieces = 6u32;
         for k in 0..pieces {
             let v = salvage / pieces + u32::from(k < salvage % pieces);
@@ -408,7 +571,7 @@ impl Sim {
     /// Covered by anything that isn't a drag: buried, paused, hidden. Bare again: dug out.
     fn bury(&mut self, grid: &OcclusionGrid, ev: &mut Vec<SimEvent>) {
         for rig in &mut self.rigs {
-            let covered = !grid.all_bare(sky(rig.rect, grid.cell_px()));
+            let covered = rig.lost || !grid.all_bare(sky(rig.rect, grid.cell_px()));
             if covered != rig.buried {
                 rig.buried = covered;
                 ev.push(if covered { SimEvent::StructureBuried { id: rig.id } } else { SimEvent::StructureUnburied { id: rig.id } });
@@ -481,13 +644,17 @@ impl Sim {
                 let top = (f.t - jib) as f32;
                 let segs = (((f.b as f32 - top) / 40.0).ceil() as u8).clamp(4, 40);
                 // Spawned slightly slack and off-vertical so it settles with a visible swing.
-                ropes[k] = Some(self.ropes.spawn([x as f32, top], [x as f32 + 30.0, f.b as f32], segs));
+                let out = if k == 0 { -30.0 } else { 30.0 }; // start swung outward, away from the frame
+                let rope = self.ropes.spawn([x as f32, top], [x as f32 + out, f.b as f32], segs);
+                // The window is solid to its own ropes: they bounce off the frame, never swing behind it.
+                self.ropes.set_collider(rope, Some([f.l as f32, f.t as f32, f.r as f32, f.b as f32]));
+                ropes[k] = Some(rope);
                 cranes[k] = Some(([post as f32, f.t as f32], [x as f32, top]));
             }
         }
         self.ledger.scrap -= cost;
         let id = self.id();
-        self.rigs.push(Rig { id, window: t.id, rect, buried: false, ropes, cranes });
+        self.rigs.push(Rig { id, window: t.id, rect, buried: false, ropes, cranes, anchor: f, lost: false });
         ev.push(SimEvent::RigDeployed { id });
         let want = self.cfg.miners_per_rig;
         for k in 0..want {
@@ -502,7 +669,10 @@ impl Sim {
         let platforms: Vec<Platform> = self.platforms(inp.grid);
         let cfg = self.cfg.clone();
         let rigs = self.rigs.clone();
+        let wr = self.wallrun;
+        let floor = inp.shaft.map(|sh| sh.b as f32);
         let mut delivered = 0u32;
+        let mut hatches: Vec<f32> = Vec::new();
         for u in &mut self.units {
             match u.state.clone() {
                 UnitState::AtRig { rig, t } => {
@@ -564,6 +734,9 @@ impl Sim {
                         Landing::Bedrock => {
                             ev.push(SimEvent::UnitLanded { unit: u.id, on: LandingKind::Bedrock });
                             delivered += u.carrying;
+                            if u.carrying > 0 {
+                                hatches.push(b.pos[0]);
+                            }
                             u.carrying = 0;
                             u.state = UnitState::Home { t: 0 };
                         }
@@ -582,6 +755,40 @@ impl Sim {
                         u.state = UnitState::Walking { y, x0, x1, dir };
                     }
                 }
+                UnitState::WallClimb { y } => match wr {
+                    Some(w) => {
+                        let y2 = y - WALL_CLIMB_PX_PER_TICK * cfg.art_scale;
+                        u.pos = [w.wall_x, y2.max(w.hook[1])];
+                        u.state = if y2 <= w.hook[1] + 6.0 { UnitState::WallMine { t: 0 } } else { UnitState::WallClimb { y: y2 } };
+                    }
+                    None => u.state = UnitState::WallSlide { y: u.pos[1] },
+                },
+                UnitState::WallMine { t } => match wr {
+                    Some(_) if t + 1 < cfg.mine_ticks => u.state = UnitState::WallMine { t: t + 1 },
+                    Some(_) => {
+                        u.carrying = cfg.scrap_per_load;
+                        u.state = UnitState::WallSlide { y: u.pos[1] };
+                    }
+                    None => u.state = UnitState::WallSlide { y: u.pos[1] },
+                },
+                UnitState::WallSlide { y } => {
+                    let bottom = floor.unwrap_or(y);
+                    let y2 = y + WALL_SLIDE_PX_PER_TICK * cfg.art_scale;
+                    u.pos[1] = y2.min(bottom);
+                    if y2 >= bottom {
+                        if u.carrying > 0 {
+                            hatches.push(u.pos[0]);
+                        }
+                        delivered += u.carrying;
+                        u.carrying = 0;
+                        u.state = match wr {
+                            Some(_) => UnitState::WallClimb { y: bottom },
+                            None => UnitState::Home { t: 0 },
+                        };
+                    } else {
+                        u.state = UnitState::WallSlide { y: y2 };
+                    }
+                }
                 UnitState::Home { t } => {
                     if t + 1 < cfg.home_ticks {
                         u.state = UnitState::Home { t: t + 1 };
@@ -597,6 +804,7 @@ impl Sim {
                 }
             }
         }
+        self.hatches.extend(hatches.into_iter().map(|x| (x, HATCH_TICKS)));
         if delivered > 0 {
             self.ledger.scrap += delivered;
             self.ledger.delivered_total += delivered;
@@ -613,6 +821,113 @@ impl Sim {
                 true
             }
         });
+    }
+
+    /// §2.3 wall-run: when the target is maximized or flush against SHAFT and frontier mode can't place a rig, the crew
+    /// climbs SHAFT's inner wall, hooks the window's top-left corner, mines it and slides home.
+    fn wallrun_step(&mut self, inp: &FrameInputs, ev: &mut Vec<SimEvent>) {
+        if let Some(w) = self.wallrun {
+            let snapped = inp.moved.iter().any(|(id, _, _)| *id == w.window);
+            let released = !inp.target.is_some_and(|t| t.id == w.window);
+            if snapped || released {
+                self.wallrun = None;
+                if snapped {
+                    for u in &mut self.units {
+                        if matches!(u.state, UnitState::WallClimb { .. } | UnitState::WallMine { .. } | UnitState::WallSlide { .. }) {
+                            u.carrying = 0;
+                            u.state = UnitState::Falling(FallBody { pos: u.pos, vel: [0.0, -40.0], chute: true });
+                            ev.push(SimEvent::UnitFalling { unit: u.id });
+                        }
+                    }
+                    self.burst_ticks = 30;
+                    self.cooldown = self.cfg.rebuild_cooldown_ticks;
+                    ev.push(SimEvent::WallRunSnapped);
+                } else {
+                    ev.push(SimEvent::WallRunReleased);
+                }
+            }
+        }
+        if self.wallrun.is_some() {
+            return;
+        }
+        let (Some(t), Some(sh)) = (inp.target, inp.shaft) else { return };
+        let frontier_no = matches!(self.build_block, Some(BuildBlock::Maximized | BuildBlock::EdgeTooHigh | BuildBlock::SkyCovered));
+        let flush = (t.frame.l - sh.r).abs() <= 8 && t.frame.t < sh.b - 40 && t.frame.b > sh.t;
+        // Same pacing as a rig: no re-hook straight after a snap, and only on a window that has sat still a second.
+        if !frontier_no || !flush || self.cooldown > 0 || self.settled_ticks < SETTLE_TICKS || self.rigs.iter().any(|r| r.window == t.id) {
+            return;
+        }
+        let s = self.cfg.art_scale;
+        let w = WallRun { window: t.id, hook: [sh.r as f32, t.frame.t.max(sh.t) as f32 + 6.0 * s], wall_x: sh.r as f32 - 14.0 * s };
+        self.wallrun = Some(w);
+        ev.push(SimEvent::WallRunStarted { window: t.id });
+        let crew = self.units.iter().filter(|u| matches!(u.state, UnitState::WallClimb { .. } | UnitState::WallMine { .. } | UnitState::WallSlide { .. })).count();
+        for k in crew..self.cfg.miners_per_rig {
+            let uid = self.id();
+            // Staggered: each starts a little further down so they don't climb as one block.
+            let y = sh.b as f32 + k as f32 * 70.0 * s;
+            self.units.push(Unit { id: uid, pos: [w.wall_x, sh.b as f32], carrying: 0, state: UnitState::WallClimb { y } });
+        }
+    }
+
+    /// Shaft lite: the drill burns fuel and bores up; every `CORE_SECS` of drilling a core drops down the shaft.
+    fn drill_step(&mut self, inp: &FrameInputs, ev: &mut Vec<SimEvent>) {
+        let Some(sh) = inp.shaft else { return };
+        self.drilling = self.ledger.fuel > 0;
+        if self.drilling {
+            self.burn_acc += DT;
+            if self.burn_acc >= FUEL_BURN_SECS {
+                self.burn_acc -= FUEL_BURN_SECS;
+                self.ledger.fuel -= 1;
+                self.depth += 1;
+            }
+            self.core_acc += DT;
+            if self.core_acc >= CORE_SECS {
+                self.core_acc -= CORE_SECS;
+                let cx = (sh.l + sh.r) as f32 / 2.0;
+                self.cores_falling.push(FallBody { pos: [cx, sh.t as f32 + 70.0 * self.cfg.art_scale], vel: [0.0, 0.0], chute: false });
+            }
+        }
+        let mut landed = 0u32;
+        self.cores_falling.retain_mut(|c| match fall_step(c, DT, &[], sh.b) {
+            Landing::StillFalling => true,
+            _ => {
+                landed += 1;
+                false
+            }
+        });
+        for _ in 0..landed {
+            self.ledger.cores += 1;
+            self.ledger.scrap += CORE_SCRAP;
+            self.hatches.push(((sh.l + sh.r) as f32 / 2.0, HATCH_TICKS * 2));
+            self.burst_ticks = 30;
+            ev.push(SimEvent::BossCore { tier: (self.depth / 50).min(255) as u8 });
+        }
+    }
+
+    fn fx_step(&mut self) {
+        for sp in &mut self.sparks {
+            sp.vel[1] += bezel_physics::GRAVITY * DT;
+            sp.pos[0] += sp.vel[0] * DT;
+            sp.pos[1] += sp.vel[1] * DT;
+            sp.ttl = sp.ttl.saturating_sub(1);
+        }
+        self.sparks.retain(|sp| sp.ttl > 0);
+        let mut done = Vec::new();
+        for (r, ttl) in &mut self.loose {
+            *ttl = ttl.saturating_sub(1);
+            if *ttl == 0 {
+                done.push(*r);
+            }
+        }
+        for r in done {
+            self.ropes.retire(r);
+        }
+        self.loose.retain(|(_, ttl)| *ttl > 0);
+        for h in &mut self.hatches {
+            h.1 = h.1.saturating_sub(1);
+        }
+        self.hatches.retain(|h| h.1 > 0);
     }
 
     fn salvage_step(&mut self, inp: &FrameInputs, ev: &mut Vec<SimEvent>) {
@@ -677,8 +992,8 @@ mod tests {
         fn build(&mut self, t: Option<TargetWindow>) -> Vec<SimEvent> {
             (0..=SETTLE_TICKS).flat_map(|_| self.step(t)).collect()
         }
-        fn step_with(&mut self, t: Option<TargetWindow>, p: PulseBatch, cells: &[CellDelta], swept: &[CellId], moved: &[(ExtWindowId, RectCause)]) -> Vec<SimEvent> {
-            self.sim.step(&FrameInputs { pulses: p, cells, swept, moved, target: t, grid: self.grid, bedrock: self.bed })
+        fn step_with(&mut self, t: Option<TargetWindow>, p: PulseBatch, cells: &[CellDelta], swept: &[(ExtWindowId, CellId)], moved: &[(ExtWindowId, Option<RectPx>, RectCause)]) -> Vec<SimEvent> {
+            self.sim.step(&FrameInputs { pulses: p, cells, swept, moved, target: t, grid: self.grid, bedrock: self.bed, shaft: None })
         }
     }
 
@@ -740,7 +1055,7 @@ mod tests {
         grid.apply(ExtWindowId(7), Some(w), RectCause::Shown);
         let bed = vec![(main, 1000), (top, -100)];
         let mut sim = Sim::new(SimConfig::default(), 1);
-        sim.step(&FrameInputs { pulses: PulseBatch::default(), cells: &[], swept: &[], moved: &[], target: Some(target(7, w)), grid: &grid, bedrock: &bed });
+        sim.step(&FrameInputs { pulses: PulseBatch::default(), cells: &[], swept: &[], moved: &[], target: Some(target(7, w)), grid: &grid, bedrock: &bed, shaft: None });
         assert!(sim.rigs().is_empty());
         assert_eq!(sim.build_block(), Some(BuildBlock::EdgeTooHigh));
     }
@@ -790,6 +1105,7 @@ mod tests {
         // Another window is dragged right across the rig.
         let swept = grid.sweep(RectPx::new(0, 200, 300, 280), RectPx::new(1500, 200, 1800, 280));
         assert!(swept.iter().any(|c| grid.cells_in(rig.rect).contains(c)));
+        let swept: Vec<(ExtWindowId, CellId)> = swept.into_iter().map(|c| (ExtWindowId(99), c)).collect();
         let ev = r.step_with(Some(target(7, w)), PulseBatch::default(), &[], &swept, &[]);
         let crushed = ev.iter().find_map(|e| if let SimEvent::StructureCrushed { salvage, .. } = e { Some(*salvage) } else { None });
         assert_eq!(crushed, Some(18), "60% of 30");
@@ -820,24 +1136,53 @@ mod tests {
         };
         // A window opens over the rig (not a drag): buried, not crushed.
         let d = grid.apply(ExtWindowId(11), Some(RectPx::new(rig_rect.l - 50, 0, rig_rect.r + 50, 290)), RectCause::Shown);
-        let ev = sim.step(&FrameInputs { pulses: PulseBatch::default(), cells: &[d], swept: &[], moved: &[], target: None, grid: &grid, bedrock: &bed });
+        let ev = sim.step(&FrameInputs { pulses: PulseBatch::default(), cells: &[d], swept: &[], moved: &[], target: None, grid: &grid, bedrock: &bed, shaft: None });
         assert!(ev.iter().any(|e| matches!(e, SimEvent::StructureBuried { .. })));
         assert_eq!(sim.rigs().len(), 1, "burying isn't crushing");
         let d = grid.apply(ExtWindowId(11), None, RectCause::Destroyed);
-        let ev = sim.step(&FrameInputs { pulses: PulseBatch::default(), cells: &[d], swept: &[], moved: &[], target: None, grid: &grid, bedrock: &bed });
+        let ev = sim.step(&FrameInputs { pulses: PulseBatch::default(), cells: &[d], swept: &[], moved: &[], target: None, grid: &grid, bedrock: &bed, shaft: None });
         assert!(ev.iter().any(|e| matches!(e, SimEvent::StructureUnburied { .. })));
     }
 
     #[test]
-    fn moving_the_anchor_window_snaps_its_rig() {
+    fn a_rig_rides_its_own_window() {
         let (mut grid, bed) = world();
         let w = RectPx::new(400, 300, 1200, 800);
         grid.apply(ExtWindowId(7), Some(w), RectCause::Shown);
         let mut r = Run { sim: Sim::new(SimConfig::default(), 1), grid: &grid, bed: &bed };
         r.build(Some(target(7, w)));
-        let ev = r.step_with(None, PulseBatch::default(), &[], &[], &[(ExtWindowId(7), RectCause::DragStart)]);
+        let before = r.sim.rigs()[0].clone();
+        let w2 = RectPx::new(600, 400, 1400, 900); // dragged 200 right, 100 down
+        // Its own drag sweeps right over where the rig was: that must not crush it (D45).
+        let own: Vec<(ExtWindowId, CellId)> = grid.sweep(w, w2).into_iter().map(|c| (ExtWindowId(7), c)).collect();
+        let ev = r.step_with(Some(target(7, w2)), PulseBatch::default(), &[], &own, &[(ExtWindowId(7), Some(w2), RectCause::DragSample)]);
+        assert!(!ev.iter().any(|e| matches!(e, SimEvent::StructureCrushed { .. })), "{ev:?}");
+        let after = r.sim.rigs()[0].clone();
+        assert_eq!((after.rect.l - before.rect.l, after.rect.t - before.rect.t), (200, 100));
+        let (b0, t0) = before.cranes[0].unwrap();
+        let (b1, t1) = after.cranes[0].unwrap();
+        assert_eq!((b1[0] - b0[0], b1[1] - b0[1], t1[0] - t0[0], t1[1] - t0[1]), (200.0, 100.0, 200.0, 100.0));
+        for _ in 0..40 {
+            r.step(Some(target(7, w2)));
+        }
+        let top = r.sim.rope_nodes(after.ropes[0].unwrap())[0];
+        assert_eq!(top, t1, "the rope's top follows the davit");
+    }
+
+    #[test]
+    fn closing_the_anchor_collapses_the_rig_and_minimizing_buries_it() {
+        let (mut grid, bed) = world();
+        let w = RectPx::new(400, 300, 1200, 800);
+        grid.apply(ExtWindowId(7), Some(w), RectCause::Shown);
+        let mut r = Run { sim: Sim::new(SimConfig::default(), 1), grid: &grid, bed: &bed };
+        r.build(Some(target(7, w)));
+        let ev = r.step_with(None, PulseBatch::default(), &[], &[], &[(ExtWindowId(7), None, RectCause::Minimized)]);
+        assert!(ev.iter().any(|e| matches!(e, SimEvent::StructureBuried { .. })));
+        let ev = r.step_with(None, PulseBatch::default(), &[], &[], &[(ExtWindowId(7), Some(w), RectCause::Restored)]);
+        assert!(ev.iter().any(|e| matches!(e, SimEvent::StructureUnburied { .. })));
+        let ev = r.step_with(None, PulseBatch::default(), &[], &[], &[(ExtWindowId(7), None, RectCause::Destroyed)]);
         assert!(ev.iter().any(|e| matches!(e, SimEvent::StructureCrushed { salvage: 18, .. })));
-        assert!(r.sim.units().iter().all(|u| !matches!(u.state, UnitState::AtRig { .. } | UnitState::Climbing { .. })));
+        assert!(r.sim.rigs().is_empty());
     }
 
     #[test]
@@ -863,6 +1208,86 @@ mod tests {
         assert_eq!(r.sim.ledger().fuel, 30);
     }
 
+    /// Home monitor 2560x1440 with SHAFT at x 0..144 and the trench top at y 1288, like THOR.
+    fn bedrock_world() -> (OcclusionGrid, Vec<(RectPx, Px)>, RectPx) {
+        let b = RectPx::new(0, 0, 2560, 1440);
+        let mons = [MonitorInfo { id: M, bounds: b, work: RectPx::new(144, 0, 2560, 1288), dpi: 96, primary: true }];
+        (OcclusionGrid::new(&mons, 16, 1), vec![(b, 1288)], RectPx::new(0, 0, 144, 1288))
+    }
+
+    fn step_shaft(sim: &mut Sim, grid: &OcclusionGrid, bed: &[(RectPx, Px)], shaft: RectPx, t: Option<TargetWindow>, moved: &[(ExtWindowId, Option<RectPx>, RectCause)]) -> Vec<SimEvent> {
+        sim.step(&FrameInputs { pulses: PulseBatch::default(), cells: &[], swept: &[], moved, target: t, grid, bedrock: bed, shaft: Some(shaft) })
+    }
+
+    #[test]
+    fn maximized_window_gets_a_wall_run_that_brings_scrap_home() {
+        let (mut grid, bed, shaft) = bedrock_world();
+        let w = RectPx::new(144, 0, 2560, 1288);
+        grid.apply(ExtWindowId(5), Some(w), RectCause::Shown);
+        let t = TargetWindow { id: ExtWindowId(5), frame: w, monitor: M, maximized: true };
+        let mut sim = Sim::new(SimConfig::default(), 1);
+        let mut started = false;
+        for _ in 0..1200 {
+            for e in step_shaft(&mut sim, &grid, &bed, shaft, Some(t), &[]) {
+                started |= matches!(e, SimEvent::WallRunStarted { .. });
+            }
+        }
+        assert!(started);
+        assert!(sim.rigs().is_empty(), "no frontier rig on a maximized window");
+        assert!(sim.ledger().delivered_total > 0, "the wall crew hauled scrap: {:?}", sim.ledger());
+        let wr = sim.wallrun().expect("still hooked");
+        assert_eq!(wr.hook[0], 144.0, "hooked at the window's top-left corner, at SHAFT's inner edge");
+        assert!(sim.units().iter().all(|u| u.pos[0] < 144.0), "the crew stays inside SHAFT");
+    }
+
+    #[test]
+    fn moving_the_hooked_window_snaps_the_wall_run() {
+        let (mut grid, bed, shaft) = bedrock_world();
+        let w = RectPx::new(144, 0, 1300, 1288); // snapped left
+        grid.apply(ExtWindowId(5), Some(w), RectCause::Shown);
+        let t = TargetWindow { id: ExtWindowId(5), frame: w, monitor: M, maximized: false };
+        let mut sim = Sim::new(SimConfig::default(), 1);
+        for _ in 0..120 {
+            step_shaft(&mut sim, &grid, &bed, shaft, Some(t), &[]);
+        }
+        assert!(sim.wallrun().is_some());
+        let ev = step_shaft(&mut sim, &grid, &bed, shaft, Some(t), &[(ExtWindowId(5), Some(w), RectCause::DragStart)]);
+        assert!(ev.iter().any(|e| matches!(e, SimEvent::WallRunSnapped)));
+        assert!(sim.units().iter().all(|u| !matches!(u.state, UnitState::WallClimb { .. } | UnitState::WallMine { .. })));
+    }
+
+    #[test]
+    fn the_drill_burns_fuel_and_drops_a_core() {
+        let (grid, bed, shaft) = bedrock_world();
+        let mut sim = Sim::new(SimConfig::default(), 1);
+        sim.ledger.fuel = 40;
+        let mut core = false;
+        for _ in 0..(SIM_HZ as usize * 50) {
+            for e in step_shaft(&mut sim, &grid, &bed, shaft, None, &[]) {
+                core |= matches!(e, SimEvent::BossCore { .. });
+            }
+        }
+        assert!(core, "a core lands after 40 s of drilling");
+        assert_eq!(sim.ledger().cores, 1);
+        assert!(sim.depth() >= 26 && sim.ledger().fuel < 40);
+    }
+
+    #[test]
+    fn a_crush_leaves_whipping_ropes_and_sparks_that_fade() {
+        let (mut grid, bed) = world();
+        let w = RectPx::new(400, 300, 1200, 800);
+        grid.apply(ExtWindowId(7), Some(w), RectCause::Shown);
+        let mut r = Run { sim: Sim::new(SimConfig::default(), 1), grid: &grid, bed: &bed };
+        r.build(Some(target(7, w)));
+        r.step_with(None, PulseBatch::default(), &[], &[], &[(ExtWindowId(7), None, RectCause::Destroyed)]);
+        assert_eq!(r.sim.loose_ropes().len(), 2);
+        assert!(!r.sim.sparks().is_empty());
+        for _ in 0..80 {
+            r.step(None);
+        }
+        assert!(r.sim.loose_ropes().is_empty() && r.sim.sparks().is_empty(), "effects fade");
+    }
+
     #[test]
     fn deterministic_per_seed() {
         let run = |seed: u64| {
@@ -871,7 +1296,7 @@ mod tests {
             grid.apply(ExtWindowId(7), Some(w), RectCause::Shown);
             let mut r = Run { sim: Sim::new(SimConfig::default(), seed), grid: &grid, bed: &bed };
             for i in 0..600 {
-                let moved: Vec<(ExtWindowId, RectCause)> = if i == 300 { vec![(ExtWindowId(7), RectCause::Jumped)] } else { vec![] };
+                let moved: Vec<(ExtWindowId, Option<RectPx>, RectCause)> = if i == 300 { vec![(ExtWindowId(7), Some(RectPx::new(420, 310, 1220, 810)), RectCause::Jumped)] } else { vec![] };
                 r.step_with(Some(target(7, w)), PulseBatch { key_events: (i % 3) as u16, ..Default::default() }, &[], &[], &moved);
             }
             r.sim
