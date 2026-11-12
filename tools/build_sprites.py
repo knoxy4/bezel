@@ -45,6 +45,14 @@ SPEC = {
     "terrarium": dict(block=27, boxes=[(30, 340, 660, 1250), (690, 440, 1112, 1250), (1112, 330, 1400, 1250),
                                        (1420, 470, 1850, 1260), (1870, 760, 2300, 1270), (2270, 430, 2720, 1250)],
                       names=["plant_fern", "plant_tentacle", "plant_eye", "plant_mushroom", "plant_spiky", "plant_star"]),
+    # Moto spike (2026-11-12): Knox's dirtbike sheets, rider faces right.
+    "moto/bike1": dict(block=8, merge=12, names=[
+        "ride_0", "ride_1", None, "ride_2", "wheelie_0", "wheelie_1", "ride_3", "air_up", "air_mid", "air_down",
+        "land_0", "land_1", "ride_4", "crash_0", "crash_1", "crash_2"]),
+    "moto/bike2": dict(block=8, merge=12, names=[
+        "trick_nohands", "trick_heel", "trick_cancan", "trick_legover", "trick_nacnac", "wheelie_2",
+        "flip_0", "flip_1", "flip_2", "flip_3", "ride_5", "trick_superman_0", "trick_superman_1",
+        "air_1", "air_2", "air_3", "air_4", "skid_0", "skid_1", "fist_0", "fist_1", "fist_2"]),
 }
 
 

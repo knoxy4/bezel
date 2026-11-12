@@ -35,6 +35,231 @@ macro_rules! say {
     ($($t:tt)*) => { crate::log::line(&format!($($t)*)) };
 }
 
+#[cfg(windows)]
+mod moto;
+
+/// `--moto`: the dirtbike spike. Same plumbing and exit paths as the main loop; only TRENCH docks (home monitor),
+/// the course runs on every monitor's underlay. Renders at 60 Hz while riders move.
+#[cfg(windows)]
+fn moto_main(secs: Option<u64>) {
+    use std::collections::HashMap;
+    use std::sync::mpsc;
+    use std::time::{Duration, Instant};
+
+    use bezel_core::{Edge, ExtWindowId, OsEvent, PulseBatch, RectPx, SurfaceId};
+    use bezel_layout::art_scale_for;
+    use bezel_os_api::{DesktopLayer, DockMode, InputPulseSource, LayerHealth, ShellDock, UnderlayMode, WindowTracker};
+    use bezel_os_win32::{session, Win32DesktopLayer, Win32Pulses, Win32ShellDock, Win32WindowTracker};
+    use bezel_render_api::{Renderer, Rgba8, SurfaceKind, WallpaperFitR};
+    use bezel_render_d2d::D2dRenderer;
+
+    let mut layer = match Win32DesktopLayer::new() {
+        Ok(l) => l,
+        Err(e) => return say!("desktop layer: {e}"),
+    };
+    let mut dock = match Win32ShellDock::new() {
+        Ok(d) => d,
+        Err(e) => return say!("dock: {e}"),
+    };
+    let mut gfx = match D2dRenderer::new() {
+        Ok(r) => r,
+        Err(e) => return say!("renderer: {e}"),
+    };
+    let mut mons = session::monitors();
+    let Some(home) = mons.iter().find(|m| m.primary).cloned() else { return say!("no primary monitor") };
+    let scale = art_scale_for(home.dpi);
+    let s = scale as f32;
+
+    let attach_underlays = |layer: &mut Win32DesktopLayer, gfx: &mut D2dRenderer, mons: &[bezel_core::MonitorInfo]| {
+        let virt = mons.iter().skip(1).fold(mons[0].bounds, |a, m| a.union(&m.bounds));
+        for m in mons {
+            let Ok(h) = layer.attach(m.id, m.bounds) else { continue };
+            if gfx.attach(SurfaceId::Underlay(m.id), SurfaceKind::Underlay, h, m.bounds, art_scale_for(m.dpi)).is_err() {
+                continue;
+            }
+            if let Some(wp) = layer.wallpaper(m.id) {
+                let fit = match wp.fit {
+                    bezel_os_api::WallpaperFit::Fill => WallpaperFitR::Fill,
+                    bezel_os_api::WallpaperFit::Fit => WallpaperFitR::Fit,
+                    bezel_os_api::WallpaperFit::Stretch => WallpaperFitR::Stretch,
+                    bezel_os_api::WallpaperFit::Tile => WallpaperFitR::Tile,
+                    bezel_os_api::WallpaperFit::Center => WallpaperFitR::Center,
+                    bezel_os_api::WallpaperFit::Span => WallpaperFitR::Span { virtual_screen: virt },
+                };
+                let _ = gfx.set_wallpaper(m.id, wp.path.as_deref(), fit, Rgba8(wp.background));
+            }
+            if layer.foreign_occupant(m.id) && gfx.set_underlay_transparent(m.id, true).is_ok() {
+                let _ = layer.set_mode(m.id, UnderlayMode::TransparentOverForeign);
+            }
+        }
+    };
+    attach_underlays(&mut layer, &mut gfx, &mons);
+
+    let mut trench: Option<RectPx> = None;
+    match dock.dock(SurfaceId::Trench, home.id, Edge::Bottom, 112 * scale as i32, DockMode::Reserve) {
+        Ok(r) => {
+            trench = Some(r);
+            if let Some(h) = dock.surface_handle(SurfaceId::Trench) {
+                if let Err(e) = gfx.attach(SurfaceId::Trench, SurfaceKind::BarComposited, h, r, scale) {
+                    say!("Trench: renderer attach failed: {e}");
+                }
+            }
+        }
+        Err(e) => say!("Trench: dock failed: {e}"),
+    }
+    mons = session::monitors();
+
+    let (os_tx, os_rx) = mpsc::channel::<OsEvent>();
+    let (pulse_tx, pulse_rx) = mpsc::channel::<PulseBatch>();
+    let mut tracker = Win32WindowTracker::new();
+    if let Err(e) = tracker.start(os_tx) {
+        say!("window tracker: {e}");
+    }
+    let mut pulses = Win32Pulses::new();
+    if let Err(e) = pulses.start(pulse_tx) {
+        say!("pulses: {e}");
+    }
+    let mut windows: HashMap<ExtWindowId, RectPx> = HashMap::new();
+    for m in &mons {
+        for (id, r) in tracker.snapshot(m.id) {
+            windows.insert(id, r);
+        }
+    }
+    let sprites = match atlas::Sprites::load(std::path::Path::new("assets/atlas")) {
+        Some((sp, desc)) => match gfx.load_atlas(&desc) {
+            Ok(()) => sp,
+            Err(e) => {
+                say!("atlas failed to load ({e}); drawing shapes");
+                atlas::Sprites::default()
+            }
+        },
+        None => atlas::Sprites::default(),
+    };
+
+    let mut segs = moto::segments(&mons, trench, &windows, s);
+    let mut game = moto::Moto::new(&mons, &segs, s, 3, 0xD1B7_0001);
+    let world = mons.iter().skip(1).fold(mons[0].bounds, |a, m| a.union(&m.bounds));
+    say!(
+        "MOTO spike: {} monitors, world ({},{})-({},{}), heading {}, {} track segments ({} window tops), TRENCH {:?}",
+        mons.len(),
+        world.l,
+        world.t,
+        world.r,
+        world.b,
+        if game.dir() < 0.0 { "left" } else { "right" },
+        segs.len(),
+        segs.iter().filter(|g| g.kick).count(),
+        trench
+    );
+
+    let start = Instant::now();
+    let mut last = Instant::now();
+    let mut acc = 0.0f32;
+    let mut next_frame = Instant::now();
+    let mut last_health = Instant::now();
+    let mut stood_down = false;
+    let mut keys = 0u32;
+    let mut frames = 0u64;
+    let mut last_score = game.score;
+    loop {
+        if secs.is_some_and(|x| start.elapsed() >= Duration::from_secs(x)) || session::exit_requested() {
+            break;
+        }
+        let wait = next_frame.saturating_duration_since(Instant::now()).as_millis().min(16) as u32;
+        if !session::pump(wait) {
+            break;
+        }
+        let mut dirty = false;
+        while let Ok(ev) = os_rx.try_recv() {
+            if let OsEvent::WindowRect { id, rect, .. } = ev {
+                match rect {
+                    Some(r) => windows.insert(id, r),
+                    None => windows.remove(&id),
+                };
+                dirty = true;
+            }
+        }
+        while let Ok(p) = pulse_rx.try_recv() {
+            keys += p.key_events as u32;
+        }
+        for ev in dock.service() {
+            match ev {
+                OsEvent::Docked { surface, rect } => {
+                    gfx.resize(surface, (rect.width() as u32, rect.height() as u32));
+                    if surface == SurfaceId::Trench {
+                        trench = Some(rect);
+                    }
+                    mons = session::monitors();
+                    dirty = true;
+                }
+                OsEvent::StandDown { on, .. } => stood_down = on,
+                _ => {}
+            }
+        }
+        pulses.set_paused(stood_down);
+        if dirty {
+            segs = moto::segments(&mons, trench, &windows, s);
+        }
+        if last_health.elapsed() >= Duration::from_secs(1) {
+            last_health = Instant::now();
+            if layer.health() == LayerHealth::ResetNeeded {
+                say!("desktop layer reset: reattaching underlays");
+                for m in &mons {
+                    gfx.detach(SurfaceId::Underlay(m.id));
+                }
+                layer.detach_all();
+                attach_underlays(&mut layer, &mut gfx, &session::monitors());
+            }
+        }
+
+        let now = Instant::now();
+        let dt = (now - last).as_secs_f32().min(0.25);
+        acc += dt;
+        last = now;
+        let key_rate = keys as f32 / dt.max(1e-3);
+        keys = 0;
+        while acc >= 1.0 / moto::HZ {
+            acc -= 1.0 / moto::HZ;
+            game.step(&segs, key_rate);
+        }
+        let sc = game.score;
+        if sc.tricks != last_score.tricks || sc.crashes != last_score.crashes || sc.laps != last_score.laps {
+            say!("moto: score {} best line {} tricks {} crashes {} (ate it {}) laps {}", sc.total, sc.best_line, sc.tricks, sc.crashes, sc.eaten, sc.laps);
+            last_score = sc;
+        }
+        if Instant::now() >= next_frame {
+            next_frame = Instant::now() + Duration::from_secs_f32(1.0 / moto::HZ);
+            if !stood_down {
+                if let Err(e) = gfx.submit(&moto::frame(&game, &mons, trench, &segs, &sprites)) {
+                    say!("submit: {e}");
+                }
+                frames += 1;
+            }
+        }
+    }
+
+    pulses.stop();
+    tracker.stop();
+    gfx.detach(SurfaceId::Trench);
+    dock.undock_all();
+    for m in &mons {
+        gfx.detach(SurfaceId::Underlay(m.id));
+    }
+    layer.detach_all();
+    session::mark_cleaned();
+    let sc = game.score;
+    say!(
+        "moto exit after {:.0} s: {frames} frames; score {} best line {} tricks {} crashes {} ate it {} laps {}. Bar undocked, underlays detached, wallpaper never written.",
+        start.elapsed().as_secs_f32(),
+        sc.total,
+        sc.best_line,
+        sc.tricks,
+        sc.crashes,
+        sc.eaten,
+        sc.laps
+    );
+}
+
 /// Percent of each monitor's cells that are bare.
 #[cfg(windows)]
 fn bare_report(grid: &bezel_layout::OcclusionGrid, mons: &[bezel_core::MonitorInfo]) -> String {
@@ -140,6 +365,9 @@ fn main() {
         let u = bezel_os_win32::emergency_detach();
         say!("emergency: {b} bar(s) undocked, {u} underlay(s) detached");
     }));
+    if std::env::args().any(|a| a == "--moto") {
+        return moto_main(secs);
+    }
 
     let mut layer = match Win32DesktopLayer::new() {
         Ok(l) => l,

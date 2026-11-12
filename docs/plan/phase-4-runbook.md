@@ -1,6 +1,6 @@
 # Phase 4 runbook (was "W4"; D44)
 
-**Gate: trailer-ready** (fest plan §4). If it passes, Knox pays the Steam Direct fee (D39).
+~~**Gate: trailer-ready** (fest plan §4). If it passes, Knox pays the Steam Direct fee (D39).~~ **D47 (2026-11-08):** no fee until polished and done; the January fest is dropped. Phase 4 closes on its built items; next phase is depth.
 - The loop runs on THOR's real desktop: miners hook a window, a rig and ropes go up, a drag crushes and salvage comes
   home, typing heats the foundry.
 - Hero sprites come from the locked style frame.
