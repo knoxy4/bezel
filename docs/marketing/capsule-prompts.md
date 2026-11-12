@@ -35,8 +35,8 @@ Tags: **[VERIFY]** = check before relying on it.
 Use the BEZEL wrapper. It adds the custom style (D43) and runs imagegen detached; the imagegen daemon takes the gpu lease itself. **Never wrap imagegen in `thor_lease submit`/`take`:** the daemon queues behind its own caller and deadlocks (it happened 2026-11-07). Check the board first, and remember that killing the client doesn't stop a batch.
 
 ```powershell
-& C:\Users\KNX\CAGED\tools\thor_lease.ps1 status
-.\tools\bezel-imagegen.ps1 -Name header -Size 1536x720 -Count 8 -Ref C:\Users\KNX\BEZEL\assets\art\style-frame.png -Prompt '<prompt>'
+& "$env:USERPROFILE\CAGED\tools\thor_lease.ps1" status
+.\tools\bezel-imagegen.ps1 -Name header -Size 1536x720 -Count 8 -Ref assets\art\style-frame.png -Prompt '<prompt>'
 ```
 
 Result paths and seeds land in `assets/art/jobs/<name>-<stamp>.json`. With contention, 1536-wide images took ~40 s each on 2026-11-07, not the 14 s the skill quotes.

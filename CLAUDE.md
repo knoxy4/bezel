@@ -17,14 +17,14 @@ Co-built by KNX (operator) and SPC (AI). Knox doesn't hand-code: explain results
 - This repo's `docs/` is canon for code. The claude.ai BEZEL project mirrors it. When the ADR changes here, say so in the summary to Knox so the mirror gets updated.
 
 ## Build environment (THOR)
-- Windows-native PowerShell in `C:\Users\KNX\BEZEL`. The Win32 crates need MSVC.
+- Windows-native PowerShell in the repo root. The Win32 crates need MSVC.
 - Toolchain verified 2026-11-07: `stable-x86_64-pc-windows-msvc`, rustc/cargo 1.94.1, Visual Studio 2026 Community with C++ tools.
 - rustup's default host on THOR is **gnu**. `rust-toolchain.toml` pins `1.94.1`, and a per-directory override (`rustup override set 1.94.1-x86_64-pc-windows-msvc`, set 2026-11-07) makes it resolve to MSVC. Check `rustc -vV` shows `host: x86_64-pc-windows-msvc` before trusting a build.
 - `cargo` may not be on PATH in every shell. Fall back to `$env:USERPROFILE\.cargo\bin\cargo.exe`.
 - WSL only for the pure crates, with `CARGO_TARGET_DIR=target-wsl` so it doesn't clobber MSVC artifacts.
 
 ## THOR is shared: leases
-- The tool is `C:\Users\KNX\CAGED\tools\thor_lease.ps1`. **Its header is canon.** Read it before anything non-trivial.
+- The tool is `$env:USERPROFILE\CAGED\tools\thor_lease.ps1`. **Its header is canon.** Read it before anything non-trivial.
 - Run `status` before a full build or anything that puts load on the GPU. THOR runs parallel CAGED sessions.
 - Full builds (the first `windows` crate build, release builds): `build` lease.
 - Timed measurements (spikes S4 and S6, any fps or frame-cost numbers): `gpu` lease on a quiet GPU.

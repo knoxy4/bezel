@@ -7,5 +7,11 @@ $extra = if ($Moto) { ' --moto' } else { '' }
 $repo = Split-Path -Parent $PSScriptRoot
 $exe = Join-Path $repo 'target\debug\bezel-app.exe'
 if (-not (Test-Path $exe)) { Write-Host "build first: cargo build -p bezel-app"; exit 2 }
-& C:\Users\KNX\CAGED\tools\thor_lease.ps1 run -By knox-bezel -Lease gpu -NoQuiet -Exe $exe -ArgList "--seconds $Seconds$extra" -WorkDir $repo -For "BEZEL play session ($Seconds s$extra)" -EstMin $EstMin
+$lease = Join-Path $env:USERPROFILE 'CAGED\tools\thor_lease.ps1'
+if (-not (Test-Path $lease)) {
+    # Not THOR: no shared-GPU leases here, just run it.
+    & $exe --seconds $Seconds $(if ($Moto) { '--moto' })
+    exit $LASTEXITCODE
+}
+& $lease run -By knox-bezel -Lease gpu -NoQuiet -Exe $exe -ArgList "--seconds $Seconds$extra" -WorkDir $repo -For "BEZEL play session ($Seconds s$extra)" -EstMin $EstMin
 exit $LASTEXITCODE

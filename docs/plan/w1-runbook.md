@@ -4,12 +4,12 @@
 
 ## Already done (2026-11-07)
 - Steamworks paperwork: done (Knox). No fee paid yet; that happens at the trailer-ready gate (D39).
-- `C:\Users\KNX\BEZEL` created; git repo initialized; private GitHub remote created (Spec).
+- the repo root created; git repo initialized; private GitHub remote created (Spec).
 - Toolchain verified: `stable-x86_64-pc-windows-msvc`, rustc/cargo 1.94.1, Visual Studio 2026 Community with C++ tools.
-- Lease tool present at `C:\Users\KNX\CAGED\tools\thor_lease.ps1`. At 19:31 THOR was busy with CAGED work (editor and gpu leases held, two builds queued), so check `status` before the first build.
+- Lease tool present at `$env:USERPROFILE\CAGED\tools\thor_lease.ps1`. At 19:31 THOR was busy with CAGED work (editor and gpu leases held, two builds queued), so check `status` before the first build.
 
 ## Kickoff prompt
-Paste this into a Claude Code session opened in `C:\Users\KNX\BEZEL` (Windows PowerShell, not WSL):
+Paste this into a Claude Code session opened in the repo root (Windows PowerShell, not WSL):
 
 > Read `CLAUDE.md`, `docs/adr/0001-runtime-stack.md` and `docs/plan/w1-runbook.md`. Execute week-1 tasks T1 through T5 in order. Follow the lease rules in CLAUDE.md before the first full build. When T3 builds, stop and tell Knox exactly how to run the S9 spike and what to look for, then wait for his report. Do the same for T4. Record both spike verdicts in ADR §9.
 
