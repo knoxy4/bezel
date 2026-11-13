@@ -38,7 +38,7 @@ macro_rules! say {
 #[cfg(windows)]
 mod moto;
 
-/// `--moto`: the dirtbike spike. Same plumbing and exit paths as the main loop; only TRENCH docks (home monitor),
+/// The dirtbike game (default since D48; `--moto` is still accepted). Same plumbing and exit paths as the main loop; only TRENCH docks (home monitor),
 /// the course runs on every monitor's underlay. Renders at 60 Hz while riders move.
 #[cfg(windows)]
 fn moto_main(secs: Option<u64>) {
@@ -359,7 +359,8 @@ fn main() {
         let u = bezel_os_win32::emergency_detach();
         say!("emergency: {b} bar(s) undocked, {u} underlay(s) detached");
     }));
-    if std::env::args().any(|a| a == "--moto") {
+    // D48: the dirtbike game is BEZEL. The old mining loop stays reachable with `--mining` until it is removed.
+    if !std::env::args().any(|a| a == "--mining") {
         return moto_main(secs);
     }
 
