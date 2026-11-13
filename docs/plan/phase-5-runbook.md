@@ -15,5 +15,13 @@
 5. **Tuning pass:** speed, gravity, kicker pop, trick odds, combo scoring.
 6. **Canon:** rewrite ADR §2 game sections and §8 sim signatures for D48; move moto out of the app crate into the sim layer (`core ← sim`, no `windows`), so `tools/check-deps.ps1` covers it.
 
+## Status (2026-11-12, after the spike)
+- **Build crew:** ironworkers only (Knox: a full crew at all times), 5, or 10 under chaos; two per kicker; they reinforce finished kickers with hammering and sparks, and haul beams along the floors when there's nothing to build. Kickers are built objects.
+- **Cast:** a giant walker on the floors (3D render sheets, glitched frames dropped); ninjas (launch off every edge, flips, wall-climb taller windows, smoke-bomb out on a crash); rope-wrist men (grapple a window bottom mid-air, swing, let go); black widows dropping from window bottoms (riders who hit one crash); chameleons on window tops (camouflage in and out). Robo-spider sprites are cut but unused.
+- **Scale:** everyone but the giant at 1.6× (`CAST`); the cast is multiplied by `CHAOS` (x10 was too much, now 3).
+- **No bottom bar** in moto mode (Knox): nothing docks; every monitor's floor is its work-area bottom. Score shows as pop-ups and in `bezel.log`.
+- Tests: moto 13. Not yet played at chaos 3.
+- **Open direction question:** Play Mode (your window layout as a playable level), a beat-'em-up variant, or a standalone game. Knox to pick one; lock it as a decision.
+
 ## Knox
 - Watch more laps and call the tuning. Capsule picks, tags and store copy now describe dirtbikes.

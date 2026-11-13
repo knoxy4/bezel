@@ -46,9 +46,9 @@ fn moto_main(secs: Option<u64>) {
     use std::sync::mpsc;
     use std::time::{Duration, Instant};
 
-    use bezel_core::{Edge, ExtWindowId, OsEvent, PulseBatch, RectPx, SurfaceId};
+    use bezel_core::{ExtWindowId, OsEvent, PulseBatch, RectPx, SurfaceId};
     use bezel_layout::art_scale_for;
-    use bezel_os_api::{DesktopLayer, DockMode, InputPulseSource, LayerHealth, ShellDock, UnderlayMode, WindowTracker};
+    use bezel_os_api::{DesktopLayer, InputPulseSource, LayerHealth, ShellDock, UnderlayMode, WindowTracker};
     use bezel_os_win32::{session, Win32DesktopLayer, Win32Pulses, Win32ShellDock, Win32WindowTracker};
     use bezel_render_api::{Renderer, Rgba8, SurfaceKind, WallpaperFitR};
     use bezel_render_d2d::D2dRenderer;
@@ -95,19 +95,9 @@ fn moto_main(secs: Option<u64>) {
     };
     attach_underlays(&mut layer, &mut gfx, &mons);
 
+    // Knox, 2026-11-12: no bottom bar in the dirtbike game. Nothing docks, so no work-area reservation; the home
+    // floor is the work-area bottom like every other monitor. `dock` stays for the shared exit path (undock_all).
     let mut trench: Option<RectPx> = None;
-    match dock.dock(SurfaceId::Trench, home.id, Edge::Bottom, 112 * scale as i32, DockMode::Reserve) {
-        Ok(r) => {
-            trench = Some(r);
-            if let Some(h) = dock.surface_handle(SurfaceId::Trench) {
-                if let Err(e) = gfx.attach(SurfaceId::Trench, SurfaceKind::BarComposited, h, r, scale) {
-                    say!("Trench: renderer attach failed: {e}");
-                }
-            }
-        }
-        Err(e) => say!("Trench: dock failed: {e}"),
-    }
-    mons = session::monitors();
 
     let (os_tx, os_rx) = mpsc::channel::<OsEvent>();
     let (pulse_tx, pulse_rx) = mpsc::channel::<PulseBatch>();
@@ -137,7 +127,8 @@ fn moto_main(secs: Option<u64>) {
     };
 
     let mut segs = moto::segments(&mons, trench, &windows, s);
-    let mut game = moto::Moto::new(&mons, &segs, s, 3, 0xD1B7_0001);
+    // One knob for the size of the cast: moto::CHAOS.
+    let mut game = moto::Moto::with_chaos(&mons, &segs, s, 3 * moto::CHAOS, 0xD1B7_0001, moto::CHAOS);
     let world = mons.iter().skip(1).fold(mons[0].bounds, |a, m| a.union(&m.bounds));
     say!(
         "MOTO spike: {} monitors, world ({},{})-({},{}), heading {}, {} track segments ({} window tops), TRENCH {:?}",
@@ -223,8 +214,11 @@ fn moto_main(secs: Option<u64>) {
             game.step(&segs, key_rate);
         }
         let sc = game.score;
-        if sc.tricks != last_score.tricks || sc.crashes != last_score.crashes || sc.laps != last_score.laps {
-            say!("moto: score {} best line {} tricks {} crashes {} (ate it {}) laps {}", sc.total, sc.best_line, sc.tricks, sc.crashes, sc.eaten, sc.laps);
+        if sc.tricks != last_score.tricks || sc.crashes != last_score.crashes || sc.laps != last_score.laps || sc.kickers_built != last_score.kickers_built || sc.crew_falls != last_score.crew_falls || sc.spider_hits != last_score.spider_hits {
+            say!(
+                "moto: score {} best line {} tricks {} crashes {} (ate it {}, spider {}) laps {} kickers built {} crew knocked off {}",
+                sc.total, sc.best_line, sc.tricks, sc.crashes, sc.eaten, sc.spider_hits, sc.laps, sc.kickers_built, sc.crew_falls
+            );
             last_score = sc;
         }
         if Instant::now() >= next_frame {
